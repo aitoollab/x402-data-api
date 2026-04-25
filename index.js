@@ -11,13 +11,27 @@ const WALLET_ADDRESS = process.env.X402_WALLET_ADDRESS || '0x0000000000000000000
 const NETWORK = 'eip155:84532';
 
 // ─── x402 protocol helpers ───
-function send402(res, price, description) {
+function send402(res, price, description, resource) {
+  const challenge = {
+    version: 1,
+    network: NETWORK,
+    payTo: WALLET_ADDRESS,
+    price,
+    resource: resource || '',
+    description,
+    accepts: [
+      { protocol: 'exact', network: NETWORK, payTo: WALLET_ADDRESS, price },
+    ],
+    instructions: `Send ${price} USDC on Base (${NETWORK}) to ${WALLET_ADDRESS}. Retry with header x402-payment: <base64-signature>`,
+  };
+  const encoded = Buffer.from(JSON.stringify(challenge)).toString('base64');
   res.set({
     'Content-Type': 'application/json',
     'x402-Version': '1',
     'x402-Price': price,
     'x402-Network': NETWORK,
     'x402-Pay-To': WALLET_ADDRESS,
+    'Payment-Required': encoded,
     'WWW-Authenticate': `x402 version="1", price="${price}", network="${NETWORK}", pay-to="${WALLET_ADDRESS}"`,
   });
   res.status(402).json({
@@ -217,7 +231,7 @@ app.get('/api/github-trending/full', async (req, res) => {
   const settled = paymentHeader === 'true' || req.query.settled === '1';
 
   if (!settled) {
-    return send402(res, '$0.01', 'Full GitHub Trending with AI sentiment analysis');
+    return send402(res, '$0.01', 'Full GitHub Trending with AI sentiment analysis', 'https://x402-data-api-production.up.railway.app/api/github-trending/full');
   }
 
   try {
@@ -255,7 +269,7 @@ app.get('/api/npm/:package/full', async (req, res) => {
   const settled = paymentHeader === 'true' || req.query.settled === '1';
 
   if (!settled) {
-    return send402(res, '$0.02', 'Full NPM package stats with weekly downloads');
+    return send402(res, '$0.02', 'Full NPM package stats with weekly downloads', 'https://x402-data-api-production.up.railway.app/api/npm/{package}/full');
   }
 
   try {
