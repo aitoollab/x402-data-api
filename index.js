@@ -44,14 +44,17 @@ async function verifyPayment(req, expectedPrice) {
 }
 
 // ─── x402 challenge builder ───
-function buildChallenge(resource, price, description) {
+function buildChallenge(req, resource, price, description) {
+  const base = `${req.protocol}://${req.get('host')}`;
   const parsed = new URL(resource);
+  // Override resource with dynamic base URL
+  const dynamicResource = `${base}${parsed.pathname}`;
   return {
     version: 1,
     network: NETWORK,
     payTo: WALLET_ADDRESS,
     price,
-    resource,
+    resource: dynamicResource,
     description,
     accepts: [{ protocol: 'exact', network: NETWORK, payTo: WALLET_ADDRESS, price }],
     extensions: {
@@ -74,8 +77,8 @@ function buildChallenge(resource, price, description) {
   };
 }
 
-function send402(res, price, description, resource) {
-  const challenge = buildChallenge(resource, price, description);
+function send402(req, res, price, description, resource) {
+  const challenge = buildChallenge(req, resource, price, description);
   const encoded = Buffer.from(JSON.stringify(challenge)).toString('base64');
   res.set({
     'Content-Type': 'application/json',
@@ -197,17 +200,17 @@ app.get('/api/npm/:package', async (req, res) => {
 });
 
 app.get('/api/github-trending/full', async (req, res) => {
-  const resource = 'https://x402-data-api-production.up.railway.app/api/github-trending/full';
+  const resource = '/api/github-trending/full';
   const verified = await verifyPayment(req, '$0.01');
-  if (!verified) return send402(res, '$0.01', 'Full GitHub Trending with AI sentiment analysis', resource);
+  if (!verified) return send402(req, res, '$0.01', 'Full GitHub Trending with AI sentiment analysis', resource);
   try { const { data, cached } = await fetchGitHubTrending(); res.json({ source: 'github', data, cached, tier: 'paid', price: '$0.01', paid: true, verified: true }); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/npm/:package/full', async (req, res) => {
-  const resource = `https://x402-data-api-production.up.railway.app/api/npm/${req.params.package}/full`;
+  const resource = `/api/npm/${req.params.package}/full`;
   const verified = await verifyPayment(req, '$0.02');
-  if (!verified) return send402(res, '$0.02', 'Full NPM package stats with weekly downloads', resource);
+  if (!verified) return send402(req, res, '$0.02', 'Full NPM package stats with weekly downloads', resource);
   try { const data = await fetchNPMStats(req.params.package); res.json({ source: 'npm', data, tier: 'paid', price: '$0.02', paid: true, verified: true }); }
   catch (err) { res.status(404).json({ error: err.message }); }
 });
