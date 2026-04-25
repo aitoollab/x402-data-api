@@ -135,12 +135,12 @@ app.get('/', (req, res) => {
 });
 
 app.get('/.well-known/x402', (req, res) => {
-  const base = 'https://x402-data-api-production.up.railway.app';
+  const base = `${req.protocol}://${req.get('host')}`;
   res.json({ version: 1, resources: [`${base}/api/github-trending/full`, `${base}/api/npm/lodash/full`], ownershipProofs: [WALLET_ADDRESS] });
 });
 
 app.get('/openapi.json', (req, res) => {
-  const base = 'https://x402-data-api-production.up.railway.app';
+  const base = `${req.protocol}://${req.get('host')}`;
   res.json({
     openapi: '3.0.0',
     info: {
