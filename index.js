@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
 
@@ -45,8 +46,8 @@ async function verifyPayment(req, expectedPrice) {
 
 // ─── x402 challenge builder ───
 function buildChallenge(req, resource, price, description) {
-  const base = `${req.protocol}://${req.get('host')}`;
-  const parsed = new URL(resource);
+  const base = `https://${req.get('host')}`;
+  const parsed = new URL(resource, `${req.protocol}://${req.get("host")}`);
   // Override resource with dynamic base URL
   const dynamicResource = `${base}${parsed.pathname}`;
   return {
@@ -138,12 +139,12 @@ app.get('/', (req, res) => {
 });
 
 app.get('/.well-known/x402', (req, res) => {
-  const base = `${req.protocol}://${req.get('host')}`;
+  const base = `https://${req.get('host')}`;
   res.json({ version: 1, resources: [`${base}/api/github-trending/full`, `${base}/api/npm/lodash/full`], ownershipProofs: [WALLET_ADDRESS] });
 });
 
 app.get('/openapi.json', (req, res) => {
-  const base = `${req.protocol}://${req.get('host')}`;
+  const base = `https://${req.get('host')}`;
   res.json({
     openapi: '3.0.0',
     info: {
