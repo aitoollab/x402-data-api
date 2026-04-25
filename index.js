@@ -7,12 +7,74 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const WALLET_ADDRESS = process.env.X402_WALLET_ADDRESS || '0x0000000000000000000000000000000000000000';
+const WALLET_ADDRESS = (process.env.X402_WALLET_ADDRESS || '0x0000000000000000000000000000000000000000').toLowerCase();
 const NETWORK = 'eip155:84532';
+const BASE_RPC = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+
+// ─── x402 payment verification ───
+async function verifyPayment(req, expectedPrice) {
+  // x402 client sends payment proof in X-Payment header
+  const paymentHeader = req.headers['x-payment'] || req.headers['x402-payment'];
+  if (!paymentHeader) return false;
+
+  try {
+    // paymentHeader is base64-encoded JSON: { txHash, amount, currency, to, network }
+    const payment = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf8'));
+
+    // Validate fields
+    if (!payment.txHash || !payment.amount || !payment.to) return false;
+
+    // Check recipient matches our wallet
+    if (payment.to.toLowerCase() !== WALLET_ADDRESS) return false;
+
+    // Check network matches Base
+    if (payment.network !== NETWORK) return false;
+
+    // Verify on-chain via Base RPC
+    const rpcRes = await axios.post(BASE_RPC, {
+      jsonrpc: '2.0',
+      method: 'eth_getTransactionReceipt',
+      params: [payment.txHash],
+      id: 1,
+    }, { timeout: 10000 });
+
+    const receipt = rpcRes.data?.result;
+    if (!receipt) return false;
+
+    // Check transaction was successful (status === 0x1)
+    if (receipt.status !== '0x1') return false;
+
+    // Check the "to" field of the transaction matches our wallet
+    const txRes = await axios.post(BASE_RPC, {
+      jsonrpc: '2.0',
+      method: 'eth_getTransactionByHash',
+      params: [payment.txHash],
+      id: 1,
+    }, { timeout: 10000 });
+
+    const tx = txRes.data?.result;
+    if (!tx || tx.to.toLowerCase() !== WALLET_ADDRESS) return false;
+
+    // Check amount matches expected price (USDC has 6 decimals)
+    const priceInUSDC = parseFloat(expectedPrice.replace('$', ''));
+    const minAmount = (priceInUSDC * 0.999).toFixed(6); // small tolerance
+    const maxAmount = (priceInUSDC * 1.001).toFixed(6);
+    const paidAmount = (parseInt(payment.amount) / 1e6).toFixed(6);
+    if (parseFloat(paidAmount) < parseFloat(minAmount) || parseFloat(paidAmount) > parseFloat(maxAmount)) {
+      console.log(`[PAYMENT] Amount mismatch: expected ~${priceInUSDC}, got ${paidAmount} USDC`);
+      return false;
+    }
+
+    console.log(`[PAYMENT] Verified: tx=${payment.txHash} amount=${paidAmount} USDC to=${payment.to}`);
+    return true;
+  } catch (err) {
+    console.error('[PAYMENT] Verification error:', err.message);
+    return false;
+  }
+}
 
 // ─── x402 protocol helpers ───
 function buildBazaarSchema(method, path) {
-  // Build a minimal Bazaar-style input schema for an API endpoint
   const schema = {
     type: 'object',
     properties: {
@@ -165,8 +227,9 @@ app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     service: 'x402-data-api',
-    version: '1.0.0',
+    version: '1.1.0',
     timestamp: new Date().toISOString(),
+    features: { paymentVerification: true, blockchain: 'Base' },
     endpoints: {
       'GET /api/github-trending': 'free — top 5 repos, no sentiment',
       'GET /api/github-trending/full': 'PAID $0.01 — full 20 repos + AI sentiment',
@@ -190,7 +253,7 @@ app.get('/.well-known/x402', (req, res) => {
   });
 });
 
-// OpenAPI discovery (optional, for x402scan OpenAPI-first)
+// OpenAPI discovery
 app.get('/openapi.json', (req, res) => {
   const base = 'https://x402-data-api-production.up.railway.app';
   res.json({
@@ -198,7 +261,7 @@ app.get('/openapi.json', (req, res) => {
     info: {
       title: 'x402 Data API',
       description: 'AI agent micropayment data API — GitHub trending + NPM stats',
-      version: '1.0.0',
+      version: '1.1.0',
     },
     paths: {
       '/api/github-trending': {
@@ -255,13 +318,11 @@ app.get('/api/github-trending', async (req, res) => {
 
 // PAID — GitHub Trending full + AI sentiment ($0.01)
 app.get('/api/github-trending/full', async (req, res) => {
-  const paymentHeader = req.headers['x402-payment'];
-  const settled = paymentHeader === 'true' || req.query.settled === '1';
-
-  if (!settled) {
-    return send402(res, '$0.01', 'Full GitHub Trending with AI sentiment analysis', 'https://x402-data-api-production.up.railway.app/api/github-trending/full');
+  const resource = 'https://x402-data-api-production.up.railway.app/api/github-trending/full';
+  const verified = await verifyPayment(req, '$0.01');
+  if (!verified) {
+    return send402(res, '$0.01', 'Full GitHub Trending with AI sentiment analysis', resource);
   }
-
   try {
     const { data, cached } = await fetchGitHubTrending();
     res.json({
@@ -271,6 +332,7 @@ app.get('/api/github-trending/full', async (req, res) => {
       tier: 'paid',
       price: '$0.01',
       paid: true,
+      verified: true,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -293,13 +355,11 @@ app.get('/api/npm/:package', async (req, res) => {
 
 // PAID — NPM full + downloads ($0.02)
 app.get('/api/npm/:package/full', async (req, res) => {
-  const paymentHeader = req.headers['x402-payment'];
-  const settled = paymentHeader === 'true' || req.query.settled === '1';
-
-  if (!settled) {
-    return send402(res, '$0.02', 'Full NPM package stats with weekly downloads', 'https://x402-data-api-production.up.railway.app/api/npm/{package}/full');
+  const resource = `https://x402-data-api-production.up.railway.app/api/npm/${req.params.package}/full`;
+  const verified = await verifyPayment(req, '$0.02');
+  if (!verified) {
+    return send402(res, '$0.02', 'Full NPM package stats with weekly downloads', resource);
   }
-
   try {
     const data = await fetchNPMStats(req.params.package);
     res.json({
@@ -308,23 +368,25 @@ app.get('/api/npm/:package/full', async (req, res) => {
       tier: 'paid',
       price: '$0.02',
       paid: true,
+      verified: true,
     });
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
 });
 
-// ─── Payment proof submission ───
+// ─── Payment proof submission (alternative path) ───
 app.post('/api/payment/prove', express.json(), (req, res) => {
   const { txHash, endpoint, email } = req.body;
   if (!txHash || !endpoint) {
     return res.status(400).json({ error: 'txHash and endpoint are required' });
   }
-  console.log(`[PAYMENT] tx=${txHash} endpoint=${endpoint} email=${email || 'none'}`);
+  console.log(`[PAYMENT] Manual proof: tx=${txHash} endpoint=${endpoint} email=${email || 'none'}`);
   res.json({ received: true, txHash, status: 'pending_verification' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`x402-data-api running on http://0.0.0.0:${PORT}`);
+  console.log(`Payment verification: ON (Base RPC: ${BASE_RPC})`);
 });
