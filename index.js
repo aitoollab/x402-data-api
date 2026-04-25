@@ -118,6 +118,7 @@ function getDateNDaysAgo(n) {
 
 // ─── Routes ───
 
+// Root health
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
@@ -129,6 +130,68 @@ app.get('/', (req, res) => {
       'GET /api/github-trending/full': 'PAID $0.01 — full 20 repos + AI sentiment',
       'GET /api/npm/:package': 'free — basic package info',
       'GET /api/npm/:package/full': 'PAID $0.02 — full stats + weekly downloads',
+    },
+  });
+});
+
+// x402scan discovery endpoint
+app.get('/.well-known/x402', (req, res) => {
+  const base = 'https://x402-data-api-production.up.railway.app';
+  res.json({
+    version: 1,
+    resources: [
+      `${base}/api/github-trending/full`,
+      `${base}/api/npm/lodash/full`,
+    ],
+    ownershipProofs: [WALLET_ADDRESS],
+    instructions: 'Send USDC on Base (eip155:84532) to receive x402-Payment header for full access.',
+  });
+});
+
+// OpenAPI discovery (optional, for x402scan OpenAPI-first)
+app.get('/openapi.json', (req, res) => {
+  const base = 'https://x402-data-api-production.up.railway.app';
+  res.json({
+    openapi: '3.0.0',
+    info: {
+      title: 'x402 Data API',
+      description: 'AI agent micropayment data API — GitHub trending + NPM stats',
+      version: '1.0.0',
+    },
+    paths: {
+      '/api/github-trending': {
+        get: {
+          summary: 'GitHub Trending (free)',
+          responses: { '200': { description: 'Free tier — top 5 repos' } },
+        },
+      },
+      '/api/github-trending/full': {
+        get: {
+          summary: 'GitHub Trending full + AI sentiment',
+          'x-payment-info': {
+            protocols: ['x402'],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.01' },
+          },
+          responses: {
+            '200': { description: 'Full data + sentiment' },
+            '402': { description: 'Payment required' },
+          },
+        },
+      },
+      '/api/npm/{package}/full': {
+        get: {
+          summary: 'NPM package full stats',
+          parameters: [{ name: 'package', in: 'path', required: true, schema: { type: 'string' } }],
+          'x-payment-info': {
+            protocols: ['x402'],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.02' },
+          },
+          responses: {
+            '200': { description: 'Full package data' },
+            '402': { description: 'Payment required' },
+          },
+        },
+      },
     },
   });
 });
