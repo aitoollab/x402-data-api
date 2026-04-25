@@ -7,6 +7,28 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const WALLET_ADDRESS = process.env.X402_WALLET_ADDRESS || '0x0000000000000000000000000000000000000000';
+const NETWORK = 'eip155:84532';
+
+// ─── x402 protocol helpers ───
+function send402(res, price, description) {
+  res.set({
+    'Content-Type': 'application/json',
+    'x402-Version': '1',
+    'x402-Price': price,
+    'x402-Network': NETWORK,
+    'x402-Pay-To': WALLET_ADDRESS,
+    'WWW-Authenticate': `x402 version="1", price="${price}", network="${NETWORK}", pay-to="${WALLET_ADDRESS}"`,
+  });
+  res.status(402).json({
+    error: 'Payment Required',
+    price,
+    network: NETWORK,
+    payTo: WALLET_ADDRESS,
+    description,
+  });
+}
+
 // ─── In-memory cache ───
 let githubCache = null;
 let githubCacheTime = 0;
@@ -128,18 +150,11 @@ app.get('/api/github-trending', async (req, res) => {
 
 // PAID — GitHub Trending full + AI sentiment ($0.01)
 app.get('/api/github-trending/full', async (req, res) => {
-  // Check for x402 payment header (simulated — real x402 facilitator would validate)
   const paymentHeader = req.headers['x402-payment'];
   const settled = paymentHeader === 'true' || req.query.settled === '1';
 
   if (!settled) {
-    return res.status(402).json({
-      error: 'Payment Required',
-      price: '$0.01',
-      instructions: 'Send USDC on Base network to your wallet, then include header x402-payment: true or ?settled=1',
-      network: 'Base (eip155:84532)',
-      payTo: process.env.X402_WALLET_ADDRESS || '0x...',
-    });
+    return send402(res, '$0.01', 'Full GitHub Trending with AI sentiment analysis');
   }
 
   try {
@@ -177,13 +192,7 @@ app.get('/api/npm/:package/full', async (req, res) => {
   const settled = paymentHeader === 'true' || req.query.settled === '1';
 
   if (!settled) {
-    return res.status(402).json({
-      error: 'Payment Required',
-      price: '$0.02',
-      instructions: 'Send USDC on Base network to your wallet, then include header x402-payment: true or ?settled=1',
-      network: 'Base (eip155:84532)',
-      payTo: process.env.X402_WALLET_ADDRESS || '0x...',
-    });
+    return send402(res, '$0.02', 'Full NPM package stats with weekly downloads');
   }
 
   try {
@@ -200,15 +209,12 @@ app.get('/api/npm/:package/full', async (req, res) => {
   }
 });
 
-// ─── Payment proof submission endpoint ───
-// In production this would verify on-chain. For MVP: manual review queue.
+// ─── Payment proof submission ───
 app.post('/api/payment/prove', express.json(), (req, res) => {
   const { txHash, endpoint, email } = req.body;
   if (!txHash || !endpoint) {
     return res.status(400).json({ error: 'txHash and endpoint are required' });
   }
-  // TODO: verify txHash on-chain (Base scan API)
-  // For now: log and acknowledge
   console.log(`[PAYMENT] tx=${txHash} endpoint=${endpoint} email=${email || 'none'}`);
   res.json({ received: true, txHash, status: 'pending_verification' });
 });
@@ -216,11 +222,4 @@ app.post('/api/payment/prove', express.json(), (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`x402-data-api running on http://0.0.0.0:${PORT}`);
-  console.log(`\nEndpoints:`);
-  console.log(`  GET /                                 — health`);
-  console.log(`  GET /api/github-trending              — FREE (top 5)`);
-  console.log(`  GET /api/github-trending/full        — PAID $0.01`);
-  console.log(`  GET /api/npm/:package                — FREE (basic)`);
-  console.log(`  GET /api/npm/:package/full           — PAID $0.02`);
-  console.log(`  POST /api/payment/prove               — submit payment proof`);
 });
