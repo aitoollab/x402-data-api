@@ -11,19 +11,47 @@ const WALLET_ADDRESS = process.env.X402_WALLET_ADDRESS || '0x0000000000000000000
 const NETWORK = 'eip155:84532';
 
 // ─── x402 protocol helpers ───
-function send402(res, price, description, resource) {
-  const challenge = {
+function buildBazaarSchema(method, path) {
+  // Build a minimal Bazaar-style input schema for an API endpoint
+  const schema = {
+    type: 'object',
+    properties: {
+      method: { type: 'string', const: method },
+      path: { type: 'string', const: path },
+    },
+    required: ['method', 'path'],
+  };
+  return schema;
+}
+
+function buildChallenge(resource, price, description) {
+  const parsed = new URL(resource);
+  return {
     version: 1,
     network: NETWORK,
     payTo: WALLET_ADDRESS,
     price,
-    resource: resource || '',
+    resource,
     description,
     accepts: [
       { protocol: 'exact', network: NETWORK, payTo: WALLET_ADDRESS, price },
     ],
-    instructions: `Send ${price} USDC on Base (${NETWORK}) to ${WALLET_ADDRESS}. Retry with header x402-payment: <base64-signature>`,
+    extensions: {
+      bazaar: {
+        info: {
+          title: description,
+          description,
+          price: { amount: price, currency: 'USD' },
+        },
+        inputSchema: buildBazaarSchema('GET', parsed.pathname),
+      },
+    },
+    instructions: `Send ${price} USDC on Base (${NETWORK}) to ${WALLET_ADDRESS}. Include header X-Payment: <base64-encoded-payment-proof>`,
   };
+}
+
+function send402(res, price, description, resource) {
+  const challenge = buildChallenge(resource, price, description);
   const encoded = Buffer.from(JSON.stringify(challenge)).toString('base64');
   res.set({
     'Content-Type': 'application/json',
