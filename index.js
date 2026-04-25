@@ -58,6 +58,16 @@ function buildChallenge(resource, price, description) {
       bazaar: {
         info: { title: description, description, price: { amount: price, currency: 'USD' } },
         inputSchema: { type: 'object', properties: { method: { type: 'string', const: 'GET' }, path: { type: 'string', const: parsed.pathname } }, required: ['method', 'path'] },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            source: { type: 'string', enum: ['github', 'npm'] },
+            data: { type: 'array' },
+            tier: { type: 'string', enum: ['free', 'paid'] },
+            paid: { type: 'boolean' },
+            verified: { type: 'boolean' },
+          },
+        },
       },
     },
     instructions: `Send ${price} USDC on Base (${NETWORK}) to ${WALLET_ADDRESS}. Retry with header X-Payment: <base64 {txHash,amount,to,network}>`,
@@ -74,7 +84,8 @@ function send402(res, price, description, resource) {
     'Payment-Required': encoded,
     'WWW-Authenticate': `x402 version="1", price="${price}", network="${NETWORK}", pay-to="${WALLET_ADDRESS}"`,
   });
-  res.status(402).json({ error: 'Payment Required', price, network: NETWORK, payTo: WALLET_ADDRESS, description });
+  // Return FULL challenge as body (not just error message) so x402scan probe can parse it
+  res.status(402).json(challenge);
 }
 
 // ─── Cache ───
