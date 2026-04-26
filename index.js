@@ -48,7 +48,7 @@ function buildPaymentRequirements(resource, description, amountUsd, schema) {
   const amountAtomic = String(Math.round(amountUsd * 1_000_000));
   
   return {
-    x402Version: 2,
+    x402Version: "2",
     error: 'X-PAYMENT header is required',
     resource: {
       url: resource,
