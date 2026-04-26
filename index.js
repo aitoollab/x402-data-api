@@ -24,6 +24,13 @@ const ASSET = NETWORK === 'eip155:8453' ? USDC_BASE : USDC_BASE_SEPOLIA;
 // CoinGecko API (free, no key needed)
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 
+// DeFi Llama API (free, no key needed)
+const DEFILLAMA_API = 'https://api.llama.fi';
+
+// Etherscan API (free tier)
+const ETHERSCAN_API = 'https://api.etherscan.io/api';
+const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY || 'YourApiKeyToken';
+
 // Simple cache
 const cache = new Map();
 const CACHE_TTL = 60000;
@@ -146,16 +153,20 @@ function requirePayment(amountUsd, description, httpMethod, queryParams, outputE
 
 app.get('/', (req, res) => {
   res.json({
-    name: 'x402 Crypto Data API',
-    version: '2.0.0',
-    description: 'Real-time cryptocurrency data with x402 micropayments',
+    name: 'x402 Crypto & DeFi Data API',
+    version: '2.1.0',
+    description: 'Real-time cryptocurrency and DeFi data with x402 micropayments',
     endpoints: {
       free: ['GET /', 'GET /api/health'],
-      paid: [
+      crypto: [
         'GET /api/crypto/price/{symbol} - $0.01',
         'GET /api/crypto/trending - $0.01',
         'GET /api/crypto/market - $0.02',
         'GET /api/crypto/analysis/{symbol} - $0.05'
+      ],
+      defi: [
+        'GET /api/defi/yields - $0.05 (Top yields across protocols)',
+        'GET /api/defi/tvl - $0.03 (TVL statistics)'
       ]
     }
   });
@@ -341,6 +352,101 @@ app.get('/api/crypto/analysis/:symbol', async (req, res) => {
   }
 });
 
+// ─── PAID ENDPOINTS: DeFi Data (DIFFERENTIATED) ──────────
+
+app.get('/api/defi/yields', async (req, res) => {
+  const outputExample = {
+    top_yields: [
+      { protocol: 'Aave', chain: 'Ethereum', apy: 5.2, tvl: 1000000000 },
+      { protocol: 'Compound', chain: 'Ethereum', apy: 4.8, tvl: 800000000 }
+    ],
+    last_updated: '2026-04-27T00:00:00.000Z'
+  };
+  
+  const gate = requirePayment(0.05, 'Top DeFi yields across protocols', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // DeFi Llama API - free, no key needed
+      const data = await fetchWithCache(`${DEFILLAMA_API}/yields`);
+      
+      // Filter and sort by APY, exclude stablecoin pools with low TVL
+      const topYields = data.data
+        .filter(p => p.tvlUsd > 1000000 && p.apy > 0)
+        .sort((a, b) => b.apy - a.apy)
+        .slice(0, 20)
+        .map(p => ({
+          protocol: p.project,
+          chain: p.chain,
+          pool: p.symbol,
+          apy: Math.round(p.apy * 100) / 100,
+          tvl_usd: Math.round(p.tvlUsd),
+          reward_tokens: p.rewardTokens?.slice(0, 2) || []
+        }));
+      
+      res.json({
+        top_yields: topYields,
+        total_pools: data.data.length,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch DeFi yields' });
+    }
+  }
+});
+
+app.get('/api/defi/tvl', async (req, res) => {
+  const outputExample = {
+    total_tvl: 50000000000,
+    chains: [
+      { chain: 'Ethereum', tvl: 30000000000, change_24h: 2.5 }
+    ],
+    protocols: [
+      { name: 'Lido', tvl: 15000000000, chain: 'Ethereum' }
+    ]
+  };
+  
+  const gate = requirePayment(0.03, 'DeFi TVL statistics', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const [chains, protocols] = await Promise.all([
+        fetchWithCache(`${DEFILLAMA_API}/v2/chains`),
+        fetchWithCache(`${DEFILLAMA_API}/protocols`)
+      ]);
+      
+      const totalTvl = chains.reduce((sum, c) => sum + (c.tvl || 0), 0);
+      
+      res.json({
+        total_tvl: Math.round(totalTvl),
+        chains: chains
+          .filter(c => c.tvl > 10000000)
+          .sort((a, b) => b.tvl - a.tvl)
+          .slice(0, 15)
+          .map(c => ({
+            chain: c.name,
+            tvl: Math.round(c.tvl),
+            change_24h: Math.round((c.change_1d || 0) * 100) / 100
+          })),
+        top_protocols: protocols
+          .sort((a, b) => b.tvl - a.tvl)
+          .slice(0, 10)
+          .map(p => ({
+            name: p.name,
+            tvl: Math.round(p.tvl),
+            chain: p.chain,
+            category: p.category
+          })),
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch TVL data' });
+    }
+  }
+});
+
 // ─── OpenAPI / Discovery ──────────────────────────────
 
 app.get('/openapi.json', (req, res) => {
@@ -432,6 +538,42 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'Analysis' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/defi/yields': {
+        get: {
+          summary: 'Top DeFi yields across protocols (PAID $0.05)',
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '50000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'DeFi yields' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/defi/tvl': {
+        get: {
+          summary: 'DeFi TVL statistics (PAID $0.03)',
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.03' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '30000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'TVL data' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
@@ -445,7 +587,9 @@ app.get('/.well-known/x402', (req, res) => {
       `${origin}/api/crypto/price/{symbol}`,
       `${origin}/api/crypto/trending`,
       `${origin}/api/crypto/market`,
-      `${origin}/api/crypto/analysis/{symbol}`
+      `${origin}/api/crypto/analysis/{symbol}`,
+      `${origin}/api/defi/yields`,
+      `${origin}/api/defi/tvl`
     ],
     ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
