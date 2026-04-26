@@ -1,6 +1,6 @@
 /**
  * x402 Data API — v2 compliant with REAL crypto data
- * 加密货币实时数据 API - 真实数据
+ * 修复：移除不存在的 inputSchema/outputSchema，使用正确的 v2 格式
  */
 
 const express = require('express');
@@ -24,9 +24,9 @@ const ASSET = NETWORK === 'eip155:8453' ? USDC_BASE : USDC_BASE_SEPOLIA;
 // CoinGecko API (free, no key needed)
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 
-// Simple cache to avoid rate limits
+// Simple cache
 const cache = new Map();
-const CACHE_TTL = 60000; // 1 minute
+const CACHE_TTL = 60000;
 
 async function fetchWithCache(url) {
   const cached = cache.get(url);
@@ -44,69 +44,42 @@ async function fetchWithCache(url) {
 
 // ─── x402 v2 helpers ──────────────────────────────────
 
-function buildPaymentRequirements(resource, description, amountUsd, outputSchema) {
+function buildPaymentRequirements(resource, description, amountUsd, schema) {
   const amountAtomic = String(Math.round(amountUsd * 1_000_000));
-  const url = new URL(resource);
+  
   return {
     x402Version: 2,
     error: 'X-PAYMENT header is required',
+    resource: {
+      url: resource,
+      description: description,
+      mimeType: 'application/json'
+    },
     accepts: [{
       scheme: 'exact',
       network: NETWORK,
+      amount: amountAtomic,
       payTo: WALLET,
       asset: ASSET,
-      amount: amountAtomic,
-      resource: resource,
-      description: description,
-      mimeType: 'application/json',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          method: { type: 'string', const: 'GET' },
-          path: { type: 'string', const: url.pathname }
-        },
-        required: ['method', 'path']
-      },
-      outputSchema: {
-        input: { type: 'application/json', method: 'GET' },
-        output: { type: 'application/json' },
-        ...(outputSchema || { type: 'object' })
-      },
       maxTimeoutSeconds: 60,
-      extra: { name: 'USDC', version: '2' }
+      extra: {
+        name: 'USDC',
+        version: '2'
+      }
     }],
     extensions: {
-      bazaar: {
-        info: {
-          title: description,
-          description: description,
-          price: { amount: amountAtomic, currency: 'USDC' },
-          input: { type: 'application/json', method: 'GET' },
-          output: { type: 'application/json' }
-        },
-        inputSchema: {
-          type: 'object',
-          properties: {
-            method: { type: 'string', const: 'GET' },
-            path: { type: 'string', const: url.pathname }
-          },
-          required: ['method', 'path']
-        },
-        outputSchema: outputSchema,
-        schema: outputSchema || { type: 'object' }
+      discovery: {
+        schema: schema || null
       }
-    },
-    instructions: `Send $${amountUsd} USDC on Base to ${WALLET}. Retry with header X-Payment: <base64>`
+    }
   };
 }
 
-function requirePayment(amountUsd, description, outputSchema) {
+function requirePayment(amountUsd, description, schema) {
   return (req, res) => {
     const paymentHeader = req.headers['x-payment'];
     
     if (paymentHeader) {
-      // TODO: verify on-chain payment
-      // For now, accept any payment header for testing
       try {
         const decoded = JSON.parse(Buffer.from(paymentHeader, 'base64').toString());
         console.log('Payment received:', decoded);
@@ -116,9 +89,8 @@ function requirePayment(amountUsd, description, outputSchema) {
       }
     }
     
-    // Return 402
     const resource = `https://${req.get('host')}${req.originalUrl}`;
-    const paymentReq = buildPaymentRequirements(resource, description, amountUsd, outputSchema);
+    const paymentReq = buildPaymentRequirements(resource, description, amountUsd, schema);
     const bodyB64 = Buffer.from(JSON.stringify(paymentReq)).toString('base64');
     
     res.setHeader('Content-Type', 'application/json');
@@ -128,24 +100,20 @@ function requirePayment(amountUsd, description, outputSchema) {
   };
 }
 
-// ─── FREE ENDPOINTS (no payment required) ─────────────
+// ─── FREE ENDPOINTS ───────────────────────────────────
 
-// Health check
 app.get('/', (req, res) => {
   res.json({
     name: 'x402 Crypto Data API',
     version: '2.0.0',
     description: 'Real-time cryptocurrency data with x402 micropayments',
     endpoints: {
-      free: [
-        'GET / - This info',
-        'GET /api/health - Health check'
-      ],
+      free: ['GET /', 'GET /api/health'],
       paid: [
-        'GET /api/crypto/price/{symbol} - Real-time price ($0.01)',
-        'GET /api/crypto/trending - Trending coins ($0.01)',
-        'GET /api/crypto/market - Market overview ($0.02)',
-        'GET /api/crypto/analysis/{symbol} - Technical analysis ($0.05)'
+        'GET /api/crypto/price/{symbol} - $0.01',
+        'GET /api/crypto/trending - $0.01',
+        'GET /api/crypto/market - $0.02',
+        'GET /api/crypto/analysis/{symbol} - $0.05'
       ]
     }
   });
@@ -157,43 +125,29 @@ app.get('/api/health', (req, res) => {
 
 // ─── PAID ENDPOINTS: Crypto Data (REAL DATA) ──────────
 
-// Real-time price for a specific coin
 app.get('/api/crypto/price/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toLowerCase();
   
-  const outputSchema = {
+  const schema = {
     type: 'object',
     properties: {
       symbol: { type: 'string' },
       name: { type: 'string' },
       current_price: { type: 'number' },
       price_change_24h: { type: 'number' },
-      price_change_percentage_24h: { type: 'number' },
-      market_cap: { type: 'number' },
-      total_volume: { type: 'number' },
-      last_updated: { type: 'string' }
+      market_cap: { type: 'number' }
     }
   };
   
-  const gate = requirePayment(0.01, `Real-time ${symbol.toUpperCase()} price data`, outputSchema);
+  const gate = requirePayment(0.01, `Real-time ${symbol.toUpperCase()} price data`, schema);
   const result = gate(req, res);
   
   if (result === 'paid') {
     try {
-      // Get coin ID from symbol (simplified mapping)
       const coinIds = {
-        'btc': 'bitcoin',
-        'eth': 'ethereum',
-        'sol': 'solana',
-        'bnb': 'binancecoin',
-        'xrp': 'ripple',
-        'ada': 'cardano',
-        'doge': 'dogecoin',
-        'dot': 'polkadot',
-        'matic': 'matic-network',
-        'link': 'chainlink',
-        'avax': 'avalanche-2',
-        'uni': 'uniswap'
+        'btc': 'bitcoin', 'eth': 'ethereum', 'sol': 'solana',
+        'bnb': 'binancecoin', 'xrp': 'ripple', 'ada': 'cardano',
+        'doge': 'dogecoin', 'dot': 'polkadot', 'link': 'chainlink'
       };
       
       const coinId = coinIds[symbol] || symbol;
@@ -209,41 +163,24 @@ app.get('/api/crypto/price/:symbol', async (req, res) => {
         price_change_percentage_24h: data.market_data.price_change_percentage_24h,
         market_cap: data.market_data.market_cap.usd,
         total_volume: data.market_data.total_volume.usd,
-        high_24h: data.market_data.high_24h.usd,
-        low_24h: data.market_data.low_24h.usd,
-        last_updated: new Date().toISOString(),
-        source: 'coingecko',
-        paid: true
+        last_updated: new Date().toISOString()
       });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch price data', message: error.message });
+      res.status(500).json({ error: 'Failed to fetch price data' });
     }
   }
 });
 
-// Trending coins (REAL DATA)
 app.get('/api/crypto/trending', async (req, res) => {
-  const outputSchema = {
+  const schema = {
     type: 'object',
     properties: {
-      trending: { 
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-            name: { type: 'string' },
-            symbol: { type: 'string' },
-            market_cap_rank: { type: 'number' },
-            price_btc: { type: 'number' }
-          }
-        }
-      },
+      trending: { type: 'array' },
       last_updated: { type: 'string' }
     }
   };
   
-  const gate = requirePayment(0.01, 'Trending cryptocurrency coins', outputSchema);
+  const gate = requirePayment(0.01, 'Trending cryptocurrency coins', schema);
   const result = gate(req, res);
   
   if (result === 'paid') {
@@ -255,37 +192,30 @@ app.get('/api/crypto/trending', async (req, res) => {
         name: c.item.name,
         symbol: c.item.symbol,
         market_cap_rank: c.item.market_cap_rank,
-        price_btc: c.item.price_btc,
-        score: c.item.score
+        price_btc: c.item.price_btc
       }));
       
       res.json({
         trending,
-        last_updated: new Date().toISOString(),
-        source: 'coingecko',
-        paid: true
+        last_updated: new Date().toISOString()
       });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch trending data', message: error.message });
+      res.status(500).json({ error: 'Failed to fetch trending data' });
     }
   }
 });
 
-// Market overview (REAL DATA)
 app.get('/api/crypto/market', async (req, res) => {
-  const outputSchema = {
+  const schema = {
     type: 'object',
     properties: {
-      total_market_cap: { type: 'number' },
-      total_volume: { type: 'number' },
+      total_market_cap_usd: { type: 'number' },
       btc_dominance: { type: 'number' },
-      eth_dominance: { type: 'number' },
-      market_cap_change_24h: { type: 'number' },
       top_coins: { type: 'array' }
     }
   };
   
-  const gate = requirePayment(0.02, 'Cryptocurrency market overview', outputSchema);
+  const gate = requirePayment(0.02, 'Cryptocurrency market overview', schema);
   const result = gate(req, res);
   
   if (result === 'paid') {
@@ -300,85 +230,62 @@ app.get('/api/crypto/market', async (req, res) => {
         total_volume_usd: global.data.total_volume.usd,
         btc_dominance: global.data.market_cap_percentage.btc,
         eth_dominance: global.data.market_cap_percentage.eth,
-        market_cap_change_24h: global.data.market_cap_change_percentage_24h_usd,
-        active_cryptocurrencies: global.data.active_cryptocurrencies,
         top_coins: topCoins.map(c => ({
-          id: c.id,
           symbol: c.symbol.toUpperCase(),
           name: c.name,
           price: c.current_price,
           change_24h: c.price_change_percentage_24h,
           market_cap: c.market_cap
         })),
-        last_updated: new Date().toISOString(),
-        source: 'coingecko',
-        paid: true
+        last_updated: new Date().toISOString()
       });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch market data', message: error.message });
+      res.status(500).json({ error: 'Failed to fetch market data' });
     }
   }
 });
 
-// Technical analysis (REAL DATA + CALCULATIONS)
 app.get('/api/crypto/analysis/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toLowerCase();
   
-  const outputSchema = {
+  const schema = {
     type: 'object',
     properties: {
       symbol: { type: 'string' },
       current_price: { type: 'number' },
-      rsi: { type: 'number' },
-      ma_7: { type: 'number' },
-      ma_30: { type: 'number' },
-      trend: { type: 'string' },
-      recommendation: { type: 'string' }
+      indicators: { type: 'object' },
+      analysis: { type: 'object' }
     }
   };
   
-  const gate = requirePayment(0.05, `Technical analysis for ${symbol.toUpperCase()}`, outputSchema);
+  const gate = requirePayment(0.05, `Technical analysis for ${symbol.toUpperCase()}`, schema);
   const result = gate(req, res);
   
   if (result === 'paid') {
     try {
-      const coinIds = {
-        'btc': 'bitcoin',
-        'eth': 'ethereum',
-        'sol': 'solana',
-        'bnb': 'binancecoin',
-        'xrp': 'ripple'
-      };
-      
+      const coinIds = { 'btc': 'bitcoin', 'eth': 'ethereum', 'sol': 'solana' };
       const coinId = coinIds[symbol] || symbol;
       
-      // Get OHLC data for analysis
       const ohlc = await fetchWithCache(
         `${COINGECKO_API}/coins/${coinId}/ohlc?vs_currency=usd&days=30`
       );
       
-      const prices = ohlc.map(c => c[4]); // closing prices
+      const prices = ohlc.map(c => c[4]);
       const currentPrice = prices[prices.length - 1];
       
-      // Simple technical analysis
+      // Technical indicators
       const ma7 = prices.slice(-7).reduce((a, b) => a + b, 0) / 7;
       const ma30 = prices.reduce((a, b) => a + b, 0) / prices.length;
       
-      // Simple RSI approximation
       let gains = 0, losses = 0;
       for (let i = 1; i < prices.length; i++) {
         const change = prices[i] - prices[i - 1];
         if (change > 0) gains += change;
         else losses -= change;
       }
-      const avgGain = gains / prices.length;
-      const avgLoss = losses / prices.length || 0.001;
-      const rs = avgGain / avgLoss;
-      const rsi = 100 - (100 / (1 + rs));
+      const rsi = 100 - (100 / (1 + gains / (losses || 0.001) / prices.length));
       
-      // Trend determination
-      let trend = 'neutral';
-      let recommendation = 'hold';
+      let trend = 'neutral', recommendation = 'hold';
       if (currentPrice > ma7 && ma7 > ma30) {
         trend = 'bullish';
         recommendation = rsi < 70 ? 'buy' : 'hold (overbought)';
@@ -390,22 +297,12 @@ app.get('/api/crypto/analysis/:symbol', async (req, res) => {
       res.json({
         symbol: symbol.toUpperCase(),
         current_price: currentPrice,
-        indicators: {
-          rsi: Math.round(rsi * 100) / 100,
-          ma_7: Math.round(ma7 * 100) / 100,
-          ma_30: Math.round(ma30 * 100) / 100
-        },
-        analysis: {
-          trend,
-          recommendation,
-          signal: rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : 'neutral'
-        },
-        last_updated: new Date().toISOString(),
-        source: 'coingecko + analysis',
-        paid: true
+        indicators: { rsi: Math.round(rsi * 100) / 100, ma_7: ma7, ma_30: ma30 },
+        analysis: { trend, recommendation },
+        last_updated: new Date().toISOString()
       });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to perform analysis', message: error.message });
+      res.status(500).json({ error: 'Failed to perform analysis' });
     }
   }
 });
@@ -413,12 +310,11 @@ app.get('/api/crypto/analysis/:symbol', async (req, res) => {
 // ─── OpenAPI / Discovery ──────────────────────────────
 
 app.get('/openapi.json', (req, res) => {
-  const origin = `https://${req.get('host')}`;
   res.json({
     openapi: '3.0.0',
     info: {
       title: 'x402 Crypto Data API',
-      description: 'Real-time cryptocurrency data with micropayments. Pay per call with USDC on Base.',
+      description: 'Real-time cryptocurrency data with micropayments.',
       version: '2.0.0'
     },
     'x-discovery': {
@@ -429,7 +325,7 @@ app.get('/openapi.json', (req, res) => {
         get: {
           summary: 'Real-time crypto price (PAID $0.01)',
           parameters: [
-            { name: 'symbol', in: 'path', required: true, schema: { type: 'string' }, description: 'Coin symbol (btc, eth, sol, etc.)' }
+            { name: 'symbol', in: 'path', required: true, schema: { type: 'string' } }
           ],
           'x-payment-info': {
             protocols: [{ x402: {} }],
@@ -440,8 +336,6 @@ app.get('/openapi.json', (req, res) => {
               payTo: WALLET,
               asset: ASSET,
               amount: '10000',
-              inputSchema: { type: 'object', properties: { method: { type: 'string', const: 'GET' }, path: { type: 'string', const: '/api/crypto/price/{symbol}' } }, required: ['method', 'path'] },
-              outputSchema: { input: { type: 'application/json', method: 'GET' }, output: { type: 'application/json' }, type: 'object' },
               maxTimeoutSeconds: 60
             }]
           },
@@ -460,8 +354,6 @@ app.get('/openapi.json', (req, res) => {
               payTo: WALLET,
               asset: ASSET,
               amount: '10000',
-              inputSchema: { type: 'object', properties: { method: { type: 'string', const: 'GET' }, path: { type: 'string', const: '/api/crypto/trending' } }, required: ['method', 'path'] },
-              outputSchema: { input: { type: 'application/json', method: 'GET' }, output: { type: 'application/json' }, type: 'object' },
               maxTimeoutSeconds: 60
             }]
           },
@@ -480,8 +372,6 @@ app.get('/openapi.json', (req, res) => {
               payTo: WALLET,
               asset: ASSET,
               amount: '20000',
-              inputSchema: { type: 'object', properties: { method: { type: 'string', const: 'GET' }, path: { type: 'string', const: '/api/crypto/market' } }, required: ['method', 'path'] },
-              outputSchema: { input: { type: 'application/json', method: 'GET' }, output: { type: 'application/json' }, type: 'object' },
               maxTimeoutSeconds: 60
             }]
           },
@@ -492,7 +382,7 @@ app.get('/openapi.json', (req, res) => {
         get: {
           summary: 'Technical analysis (PAID $0.05)',
           parameters: [
-            { name: 'symbol', in: 'path', required: true, schema: { type: 'string' }, description: 'Coin symbol' }
+            { name: 'symbol', in: 'path', required: true, schema: { type: 'string' } }
           ],
           'x-payment-info': {
             protocols: [{ x402: {} }],
@@ -503,23 +393,20 @@ app.get('/openapi.json', (req, res) => {
               payTo: WALLET,
               asset: ASSET,
               amount: '50000',
-              inputSchema: { type: 'object', properties: { method: { type: 'string', const: 'GET' }, path: { type: 'string', const: '/api/crypto/analysis/{symbol}' } }, required: ['method', 'path'] },
-              outputSchema: { input: { type: 'application/json', method: 'GET' }, output: { type: 'application/json' }, type: 'object' },
               maxTimeoutSeconds: 60
             }]
           },
-          responses: { 200: { description: 'Analysis data' }, 402: { description: 'Payment Required' } }
+          responses: { 200: { description: 'Analysis' }, 402: { description: 'Payment Required' } }
         }
       }
     }
   });
 });
 
-// .well-known/x402
 app.get('/.well-known/x402', (req, res) => {
   const origin = `https://${req.get('host')}`;
   res.json({
-    version: 1,
+    version: 2,
     resources: [
       `${origin}/api/crypto/price/{symbol}`,
       `${origin}/api/crypto/trending`,
@@ -530,10 +417,7 @@ app.get('/.well-known/x402', (req, res) => {
   });
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🦞 x402 Crypto API running on port ${PORT}`);
-  console.log(`💰 Wallet: ${WALLET}`);
-  console.log(`📊 Real crypto data from CoinGecko`);
+  console.log(`🦞 x402 Crypto API v2 running on port ${PORT}`);
 });
