@@ -20,9 +20,9 @@ const BASE_RPC = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';       // Base mainnet
 const USDC_BASE_SEPOLIA = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'; // Base Sepolia
 
-// Change this to switch networks: 'base' for mainnet, 'base-sepolia' for testnet
-const NETWORK = 'base';
-const ASSET = NETWORK === 'base' ? USDC_BASE : USDC_BASE_SEPOLIA;
+// Change this to switch networks: 'eip155:8453' for Base mainnet, 'eip155:84532' for Base Sepolia
+const NETWORK = 'eip155:8453';
+const ASSET = NETWORK === 'eip155:8453' ? USDC_BASE : USDC_BASE_SEPOLIA;
 
 // ─── x402 v2 helpers ──────────────────────────────────
 
