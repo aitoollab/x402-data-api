@@ -197,14 +197,9 @@ app.get('/openapi.json', (req, res) => {
       version: '2.0.0',
       'x-guidance': 'GET /api/github-trending — free, returns top 5 repos. GET /api/github-trending/full — costs $0.01 USDC via x402. GET /api/npm/{package}/full — costs $0.02 USDC. Free endpoints require no payment.'
     },
-    ownershipProofs: [
-      {
-        owner: WALLET,
-        message: origin,
-        signature: '0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c',
-        network: NETWORK === 'base' ? 'eip155:8453' : 'eip155:84532'
-      }
-    ],
+    'x-discovery': {
+      ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
+    },
     paths: {
       '/api/github-trending': {
         get: {
@@ -284,7 +279,8 @@ app.get('/openapi.json', (req, res) => {
 app.get('/.well-known/x402', (req, res) => {
   res.json({
     version: 1,
-    resources: ['GET /api/github-trending/full', 'GET /api/npm/{package}/full']
+    resources: ['GET /api/github-trending/full', 'GET /api/npm/{package}/full'],
+    ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
 });
 
