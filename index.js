@@ -78,7 +78,7 @@ function build402Response(req, resource, description, amountUsd, outputSchema) {
     status: 402,
     headers: {
       'Content-Type': 'application/json',
-      'X-PAYMENT-REQUIRED': bodyB64,
+      'Payment-Required': bodyB64,
     },
     body: paymentReq
   };
