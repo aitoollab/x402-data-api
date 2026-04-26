@@ -29,6 +29,7 @@ const ASSET = NETWORK === 'base' ? USDC_BASE : USDC_BASE_SEPOLIA;
 function buildPaymentRequirements(resource, description, amountUsd, outputSchema) {
   // amount in atomic units (USDC has 6 decimals)
   const amountAtomic = String(Math.round(amountUsd * 1_000_000));
+  const url = new URL(resource);
   return {
     x402Version: 2,
     error: 'X-PAYMENT header is required',
@@ -49,7 +50,22 @@ function buildPaymentRequirements(resource, description, amountUsd, outputSchema
           version: '2'
         }
       }
-    ]
+    ],
+    extensions: {
+      bazaar: {
+        info: { title: description, description, price: { amount: amountAtomic, currency: 'USDC' } },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            method: { type: 'string', const: 'GET' },
+            path: { type: 'string', const: url.pathname }
+          },
+          required: ['method', 'path']
+        },
+        outputSchema: outputSchema
+      }
+    },
+    instructions: `Send $${amountUsd} USDC on Base to ${WALLET}. Retry with header X-Payment: <base64 {txHash,amount,to,network}>`
   };
 }
 
