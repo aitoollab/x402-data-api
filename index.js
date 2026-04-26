@@ -277,9 +277,13 @@ app.get('/openapi.json', (req, res) => {
 // ─── .well-known/x402 ─────────────────────────────────
 
 app.get('/.well-known/x402', (req, res) => {
+  const origin = `https://${req.get('host')}`;
   res.json({
     version: 1,
-    resources: ['GET /api/github-trending/full', 'GET /api/npm/{package}/full'],
+    resources: [
+      `${origin}/api/github-trending/full`,
+      `${origin}/api/npm/{package}/full`
+    ],
     ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
 });
