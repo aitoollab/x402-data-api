@@ -43,6 +43,14 @@ function buildPaymentRequirements(resource, description, amountUsd, outputSchema
         resource: resource,
         description: description,
         mimeType: 'application/json',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            method: { type: 'string', const: 'GET' },
+            path: { type: 'string', const: url.pathname }
+          },
+          required: ['method', 'path']
+        },
         outputSchema: outputSchema || null,
         maxTimeoutSeconds: 60,
         extra: {
