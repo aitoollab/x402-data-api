@@ -53,7 +53,13 @@ function buildPaymentRequirements(resource, description, amountUsd, outputSchema
     ],
     extensions: {
       bazaar: {
-        info: { title: description, description, price: { amount: amountAtomic, currency: 'USDC' } },
+        info: {
+          title: description,
+          description: description,
+          price: { amount: amountAtomic, currency: 'USDC' },
+          input: { type: 'application/json', method: 'GET' },
+          output: { type: 'application/json' }
+        },
         inputSchema: {
           type: 'object',
           properties: {
@@ -62,7 +68,8 @@ function buildPaymentRequirements(resource, description, amountUsd, outputSchema
           },
           required: ['method', 'path']
         },
-        outputSchema: outputSchema
+        outputSchema: outputSchema,
+        schema: outputSchema || { type: 'object' }
       }
     },
     instructions: `Send $${amountUsd} USDC on Base to ${WALLET}. Retry with header X-Payment: <base64 {txHash,amount,to,network}>`
