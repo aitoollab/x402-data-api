@@ -254,6 +254,14 @@ app.get('/openapi.json', (req, res) => {
               payTo: WALLET,
               asset: ASSET,
               amount: '10000',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  method: { type: 'string', const: 'GET' },
+                  path: { type: 'string', const: '/api/github-trending/full' }
+                },
+                required: ['method', 'path']
+              },
               maxTimeoutSeconds: 60
             }]
           },
@@ -292,6 +300,14 @@ app.get('/openapi.json', (req, res) => {
               payTo: WALLET,
               asset: ASSET,
               amount: '20000',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  method: { type: 'string', const: 'GET' },
+                  path: { type: 'string', const: '/api/npm/{package}/full' }
+                },
+                required: ['method', 'path']
+              },
               maxTimeoutSeconds: 60
             }]
           },
