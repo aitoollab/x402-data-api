@@ -51,7 +51,18 @@ function buildPaymentRequirements(resource, description, amountUsd, outputSchema
           },
           required: ['method', 'path']
         },
-        outputSchema: outputSchema || null,
+        outputSchema: {
+          input: { type: 'application/json', method: 'GET' },
+          output: { type: 'application/json' },
+          type: 'object',
+          properties: {
+            source: { type: 'string', enum: ['github', 'npm'] },
+            data: { type: 'array' },
+            tier: { type: 'string', enum: ['free', 'paid'] },
+            paid: { type: 'boolean' },
+            verified: { type: 'boolean' }
+          }
+        },
         maxTimeoutSeconds: 60,
         extra: {
           name: 'USDC',
