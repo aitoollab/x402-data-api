@@ -44,8 +44,49 @@ async function fetchWithCache(url) {
 
 // ─── x402 v2 helpers ──────────────────────────────────
 
-function buildPaymentRequirements(resource, description, amountUsd, schema) {
+function buildPaymentRequirements(resource, description, amountUsd, httpMethod, queryParams, outputExample) {
   const amountAtomic = String(Math.round(amountUsd * 1_000_000));
+  
+  // Build bazaar extension per spec: https://github.com/coinbase/x402/blob/main/specs/extensions/bazaar.md
+  const bazaarInfo = {
+    input: {
+      type: 'http',
+      method: httpMethod || 'GET',
+      queryParams: queryParams || {}
+    },
+    output: {
+      type: 'json',
+      example: outputExample || {}
+    }
+  };
+  
+  const bazaarSchema = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    type: 'object',
+    properties: {
+      input: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', const: 'http' },
+          method: { type: 'string', enum: ['GET', 'HEAD', 'DELETE'] },
+          queryParams: {
+            type: 'object',
+            additionalProperties: { type: 'string' }
+          }
+        },
+        required: ['type', 'method']
+      },
+      output: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          example: { type: 'object' }
+        },
+        required: ['type']
+      }
+    },
+    required: ['input']
+  };
   
   return {
     x402Version: 2,
@@ -68,14 +109,15 @@ function buildPaymentRequirements(resource, description, amountUsd, schema) {
       }
     }],
     extensions: {
-      discovery: {
-        schema: schema || null
+      bazaar: {
+        info: bazaarInfo,
+        schema: bazaarSchema
       }
     }
   };
 }
 
-function requirePayment(amountUsd, description, schema) {
+function requirePayment(amountUsd, description, httpMethod, queryParams, outputExample) {
   return (req, res) => {
     const paymentHeader = req.headers['x-payment'];
     
@@ -90,7 +132,7 @@ function requirePayment(amountUsd, description, schema) {
     }
     
     const resource = `https://${req.get('host')}${req.originalUrl}`;
-    const paymentReq = buildPaymentRequirements(resource, description, amountUsd, schema);
+    const paymentReq = buildPaymentRequirements(resource, description, amountUsd, httpMethod, queryParams, outputExample);
     const bodyB64 = Buffer.from(JSON.stringify(paymentReq)).toString('base64');
     
     res.setHeader('Content-Type', 'application/json');
@@ -128,18 +170,15 @@ app.get('/api/health', (req, res) => {
 app.get('/api/crypto/price/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toLowerCase();
   
-  const schema = {
-    type: 'object',
-    properties: {
-      symbol: { type: 'string' },
-      name: { type: 'string' },
-      current_price: { type: 'number' },
-      price_change_24h: { type: 'number' },
-      market_cap: { type: 'number' }
-    }
+  const outputExample = {
+    symbol: symbol.toUpperCase(),
+    name: 'Bitcoin',
+    current_price: 45000.00,
+    price_change_24h: 500.00,
+    market_cap: 880000000000
   };
   
-  const gate = requirePayment(0.01, `Real-time ${symbol.toUpperCase()} price data`, schema);
+  const gate = requirePayment(0.01, `Real-time ${symbol.toUpperCase()} price data`, 'GET', {}, outputExample);
   const result = gate(req, res);
   
   if (result === 'paid') {
@@ -172,15 +211,14 @@ app.get('/api/crypto/price/:symbol', async (req, res) => {
 });
 
 app.get('/api/crypto/trending', async (req, res) => {
-  const schema = {
-    type: 'object',
-    properties: {
-      trending: { type: 'array' },
-      last_updated: { type: 'string' }
-    }
+  const outputExample = {
+    trending: [
+      { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC', market_cap_rank: 1 }
+    ],
+    last_updated: '2026-04-26T23:00:00.000Z'
   };
   
-  const gate = requirePayment(0.01, 'Trending cryptocurrency coins', schema);
+  const gate = requirePayment(0.01, 'Trending cryptocurrency coins', 'GET', {}, outputExample);
   const result = gate(req, res);
   
   if (result === 'paid') {
@@ -206,16 +244,15 @@ app.get('/api/crypto/trending', async (req, res) => {
 });
 
 app.get('/api/crypto/market', async (req, res) => {
-  const schema = {
-    type: 'object',
-    properties: {
-      total_market_cap_usd: { type: 'number' },
-      btc_dominance: { type: 'number' },
-      top_coins: { type: 'array' }
-    }
+  const outputExample = {
+    total_market_cap_usd: 2500000000000,
+    btc_dominance: 52.5,
+    top_coins: [
+      { symbol: 'BTC', name: 'Bitcoin', price: 45000, change_24h: 2.5 }
+    ]
   };
   
-  const gate = requirePayment(0.02, 'Cryptocurrency market overview', schema);
+  const gate = requirePayment(0.02, 'Cryptocurrency market overview', 'GET', {}, outputExample);
   const result = gate(req, res);
   
   if (result === 'paid') {
@@ -248,17 +285,14 @@ app.get('/api/crypto/market', async (req, res) => {
 app.get('/api/crypto/analysis/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toLowerCase();
   
-  const schema = {
-    type: 'object',
-    properties: {
-      symbol: { type: 'string' },
-      current_price: { type: 'number' },
-      indicators: { type: 'object' },
-      analysis: { type: 'object' }
-    }
+  const outputExample = {
+    symbol: symbol.toUpperCase(),
+    current_price: 45000,
+    indicators: { rsi: 55.5, ma_7: 44000, ma_30: 42000 },
+    analysis: { trend: 'bullish', recommendation: 'buy' }
   };
   
-  const gate = requirePayment(0.05, `Technical analysis for ${symbol.toUpperCase()}`, schema);
+  const gate = requirePayment(0.05, `Technical analysis for ${symbol.toUpperCase()}`, 'GET', {}, outputExample);
   const result = gate(req, res);
   
   if (result === 'paid') {
