@@ -14,7 +14,13 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-cd "$WORK_DIR"
+# 确保日志文件可写
+touch "$LOG_FILE" 2>/dev/null || LOG_FILE="/tmp/x402-auto-update.log"
+
+cd "$WORK_DIR" || {
+  log "ERROR: Cannot cd to $WORK_DIR"
+  exit 1
+}
 
 # 获取本地和远程的最新 commit
 LOCAL_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "none")

@@ -14,6 +14,7 @@ echo "[1/4] 下载自动更新脚本..."
 mkdir -p "$WORK_DIR/scripts"
 curl -sL "https://raw.githubusercontent.com/aitoollab/x402-data-api/main/scripts/auto-update.sh" -o "$WORK_DIR/scripts/$SCRIPT_NAME"
 chmod +x "$WORK_DIR/scripts/$SCRIPT_NAME"
+chown root:root "$WORK_DIR/scripts/$SCRIPT_NAME"
 
 # 2. 创建日志目录
 echo "[2/4] 创建日志目录..."
