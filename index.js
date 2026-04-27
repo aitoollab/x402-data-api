@@ -31,6 +31,9 @@ const DEFILLAMA_API = 'https://api.llama.fi';
 const ETHERSCAN_API = 'https://api.etherscan.io/api';
 const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY || 'YourApiKeyToken';
 
+// Open-Meteo Weather API (free, no key needed, unlimited)
+const OPEN_METEO_API = 'https://api.open-meteo.com/v1';
+
 // Simple cache
 const cache = new Map();
 const CACHE_TTL = 60000;
@@ -153,9 +156,9 @@ function requirePayment(amountUsd, description, httpMethod, queryParams, outputE
 
 app.get('/', (req, res) => {
   res.json({
-    name: 'x402 Crypto & DeFi Data API',
-    version: '2.1.0',
-    description: 'Real-time cryptocurrency and DeFi data with x402 micropayments',
+    name: 'x402 Data API Hub',
+    version: '2.2.0',
+    description: 'Multi-category data APIs with x402 micropayments',
     endpoints: {
       free: ['GET /', 'GET /api/health'],
       crypto: [
@@ -165,10 +168,15 @@ app.get('/', (req, res) => {
         'GET /api/crypto/analysis/{symbol} - $0.05'
       ],
       defi: [
-        'GET /api/defi/yields - $0.05 (Top yields across protocols)',
-        'GET /api/defi/tvl - $0.03 (TVL statistics)'
+        'GET /api/defi/yields - $0.05',
+        'GET /api/defi/tvl - $0.03'
+      ],
+      weather: [
+        'GET /api/weather/{city} - $0.01 (Current weather)',
+        'GET /api/weather/forecast/{city} - $0.02 (7-day forecast)'
       ]
-    }
+    },
+    supported_cities: ['beijing', 'shanghai', 'shenzhen', 'tokyo', 'new york', 'london', 'paris', 'singapore', 'sydney', 'dubai', 'hong kong', 'moscow', 'mumbai', 'seoul', 'los angeles']
   });
 });
 
@@ -447,6 +455,135 @@ app.get('/api/defi/tvl', async (req, res) => {
   }
 });
 
+// ─── PAID ENDPOINTS: Weather Data (HIGH DEMAND) ──────────
+
+// City name to coordinates mapping (major cities)
+const CITY_COORDS = {
+  'beijing': { lat: 39.9042, lon: 116.4074, tz: 'Asia/Shanghai' },
+  'shanghai': { lat: 31.2304, lon: 121.4737, tz: 'Asia/Shanghai' },
+  'shenzhen': { lat: 22.5431, lon: 114.0579, tz: 'Asia/Shanghai' },
+  'tokyo': { lat: 35.6762, lon: 139.6503, tz: 'Asia/Tokyo' },
+  'new york': { lat: 40.7128, lon: -74.0060, tz: 'America/New_York' },
+  'london': { lat: 51.5074, lon: -0.1278, tz: 'Europe/London' },
+  'paris': { lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris' },
+  'singapore': { lat: 1.3521, lon: 103.8198, tz: 'Asia/Singapore' },
+  'sydney': { lat: -33.8688, lon: 151.2093, tz: 'Australia/Sydney' },
+  'dubai': { lat: 25.2048, lon: 55.2708, tz: 'Asia/Dubai' },
+  'hong kong': { lat: 22.3193, lon: 114.1694, tz: 'Asia/Hong_Kong' },
+  'moscow': { lat: 55.7558, lon: 37.6173, tz: 'Europe/Moscow' },
+  'mumbai': { lat: 19.0760, lon: 72.8777, tz: 'Asia/Kolkata' },
+  'seoul': { lat: 37.5665, lon: 126.9780, tz: 'Asia/Seoul' },
+  'los angeles': { lat: 34.0522, lon: -118.2437, tz: 'America/Los_Angeles' }
+};
+
+app.get('/api/weather/:city', async (req, res) => {
+  const city = req.params.city.toLowerCase();
+  
+  const outputExample = {
+    city: city,
+    temperature: 22.5,
+    humidity: 65,
+    wind_speed: 10.2,
+    weather_code: 0,
+    weather_description: 'Clear sky',
+    last_updated: '2026-04-27T00:00:00.000Z'
+  };
+  
+  const gate = requirePayment(0.01, `Current weather for ${city}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const coords = CITY_COORDS[city];
+      if (!coords) {
+        return res.status(400).json({ 
+          error: 'City not supported',
+          supported_cities: Object.keys(CITY_COORDS)
+        });
+      }
+      
+      // Open-Meteo API - completely free, no API key needed
+      const data = await fetchWithCache(
+        `${OPEN_METEO_API}/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&timezone=${encodeURIComponent(coords.tz)}`
+      );
+      
+      const weatherCodes = {
+        0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+        45: 'Foggy', 48: 'Depositing rime fog', 51: 'Light drizzle',
+        53: 'Moderate drizzle', 55: 'Dense drizzle', 61: 'Slight rain',
+        63: 'Moderate rain', 65: 'Heavy rain', 71: 'Slight snow',
+        73: 'Moderate snow', 75: 'Heavy snow', 95: 'Thunderstorm'
+      };
+      
+      res.json({
+        city: city.charAt(0).toUpperCase() + city.slice(1),
+        temperature: data.current.temperature_2m,
+        humidity: data.current.relative_humidity_2m,
+        wind_speed: data.current.wind_speed_10m,
+        weather_code: data.current.weather_code,
+        weather_description: weatherCodes[data.current.weather_code] || 'Unknown',
+        units: { temperature: '°C', humidity: '%', wind_speed: 'km/h' },
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch weather data' });
+    }
+  }
+});
+
+app.get('/api/weather/forecast/:city', async (req, res) => {
+  const city = req.params.city.toLowerCase();
+  
+  const outputExample = {
+    city: city,
+    forecast: [
+      { date: '2026-04-27', max_temp: 25, min_temp: 18, weather: 'Sunny' }
+    ]
+  };
+  
+  const gate = requirePayment(0.02, `7-day weather forecast for ${city}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const coords = CITY_COORDS[city];
+      if (!coords) {
+        return res.status(400).json({ 
+          error: 'City not supported',
+          supported_cities: Object.keys(CITY_COORDS)
+        });
+      }
+      
+      const data = await fetchWithCache(
+        `${OPEN_METEO_API}/forecast?latitude=${coords.lat}&longitude=${coords.lon}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=${encodeURIComponent(coords.tz)}`
+      );
+      
+      const weatherCodes = {
+        0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+        45: 'Foggy', 61: 'Rain', 71: 'Snow', 95: 'Thunderstorm'
+      };
+      
+      const forecast = data.daily.time.map((date, i) => ({
+        date,
+        max_temp: data.daily.temperature_2m_max[i],
+        min_temp: data.daily.temperature_2m_min[i],
+        weather_code: data.daily.weather_code[i],
+        weather: weatherCodes[data.daily.weather_code[i]] || 'Unknown',
+        precipitation_mm: data.daily.precipitation_sum[i]
+      }));
+      
+      res.json({
+        city: city.charAt(0).toUpperCase() + city.slice(1),
+        forecast,
+        units: { temperature: '°C', precipitation: 'mm' },
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch forecast data' });
+    }
+  }
+});
+
 // ─── OpenAPI / Discovery ──────────────────────────────
 
 app.get('/openapi.json', (req, res) => {
@@ -574,6 +711,48 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'TVL data' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/weather/{city}': {
+        get: {
+          summary: 'Current weather for city (PAID $0.01)',
+          parameters: [
+            { name: 'city', in: 'path', required: true, schema: { type: 'string' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.01' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '10000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Weather data' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/weather/forecast/{city}': {
+        get: {
+          summary: '7-day weather forecast (PAID $0.02)',
+          parameters: [
+            { name: 'city', in: 'path', required: true, schema: { type: 'string' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.02' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '20000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Weather forecast' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
@@ -589,7 +768,9 @@ app.get('/.well-known/x402', (req, res) => {
       `${origin}/api/crypto/market`,
       `${origin}/api/crypto/analysis/{symbol}`,
       `${origin}/api/defi/yields`,
-      `${origin}/api/defi/tvl`
+      `${origin}/api/defi/tvl`,
+      `${origin}/api/weather/{city}`,
+      `${origin}/api/weather/forecast/{city}`
     ],
     ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
