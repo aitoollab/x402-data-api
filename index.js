@@ -179,6 +179,10 @@ app.get('/', (req, res) => {
         'GET /api/security/address/{address} - $0.08',
         'GET /api/security/token/{address} - $0.05'
       ],
+      agent: [
+        'GET /api/agent/score/{address} - $0.05',
+        'GET /api/agent/behavior/{address} - $0.03'
+      ],
       dex: [
         'GET /api/dex/volume/{token} - $0.03',
         'GET /api/dex/trending - $0.02'
@@ -945,6 +949,187 @@ app.get('/api/bridge/estimate', async (req, res) => {
   }
 });
 
+// ─── AI Agent Reputation API ──────────────────────────────
+
+// AI Agent 信誉评分 - 基于链上行为分析
+app.get('/api/agent/score/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+    address: '0x...',
+    score: 85,
+    risk_level: 'low',
+    breakdown: {
+      transaction_history: 90,
+      payment_reliability: 88,
+      account_age: 75,
+      activity_level: 82
+    },
+    summary: 'Trusted agent with good payment history'
+  };
+  
+  const gate = requirePayment(0.05, `AI Agent reputation score for ${address}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用 Etherscan API 获取链上数据
+      const txListUrl = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const balanceUrl = `${ETHERSCAN_API}?module=account&action=balance&address=${address}&tag=latest&apikey=${ETHERSCAN_KEY}`;
+      
+      const [txData, balanceData] = await Promise.all([
+        fetchWithCache(txListUrl).catch(() => ({ result: [] })),
+        fetchWithCache(balanceUrl).catch(() => ({ result: 0 }))
+      ]);
+      
+      const transactions = txData.result || [];
+      const balance = parseInt(balanceData.result || 0) / 1e18; // Wei to ETH
+      
+      // 计算各维度分数
+      const txCount = transactions.length;
+      const firstTxTime = transactions.length > 0 ? parseInt(transactions[transactions.length - 1].timeStamp) : Date.now() / 1000;
+      const accountAgeDays = Math.floor((Date.now() / 1000 - firstTxTime) / 86400);
+      
+      // 交易历史分数 (0-100)
+      const txHistoryScore = Math.min(100, txCount * 2);
+      
+      // 账户年龄分数 (0-100)
+      const ageScore = Math.min(100, accountAgeDays / 3.65);
+      
+      // 活跃度分数 (最近30天交易)
+      const recentTx = transactions.filter(tx => 
+        (Date.now() / 1000 - parseInt(tx.timeStamp)) < 30 * 86400
+      ).length;
+      const activityScore = Math.min(100, recentTx * 5);
+      
+      // 支付可靠性 (基于成功交易比例)
+      const failedTx = transactions.filter(tx => tx.isError === '1').length;
+      const reliabilityScore = txCount > 0 ? Math.round((txCount - failedTx) / txCount * 100) : 50;
+      
+      // 综合分数 (加权平均)
+      const overallScore = Math.round(
+        txHistoryScore * 0.25 +
+        ageScore * 0.20 +
+        activityScore * 0.25 +
+        reliabilityScore * 0.30
+      );
+      
+      // 风险等级
+      let riskLevel = 'low';
+      let summary = 'Trusted agent with good payment history';
+      if (overallScore < 40) {
+        riskLevel = 'high';
+        summary = 'High risk: Limited history or suspicious activity';
+      } else if (overallScore < 70) {
+        riskLevel = 'medium';
+        summary = 'Moderate risk: Consider additional verification';
+      }
+      
+      res.json({
+        address,
+        score: overallScore,
+        risk_level: riskLevel,
+        breakdown: {
+          transaction_history: txHistoryScore,
+          payment_reliability: reliabilityScore,
+          account_age: Math.round(ageScore),
+          activity_level: activityScore
+        },
+        details: {
+          total_transactions: txCount,
+          account_age_days: accountAgeDays,
+          recent_transactions_30d: recentTx,
+          balance_eth: balance.toFixed(6),
+          failed_transactions: failedTx
+        },
+        summary,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch agent reputation data' });
+    }
+  }
+});
+
+// AI Agent 行为分析
+app.get('/api/agent/behavior/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+    address: '0x...',
+    pattern: 'active_trader',
+    confidence: 0.85,
+    signals: ['frequent_transactions', 'diverse_contracts', 'low_failure_rate']
+  };
+  
+  const gate = requirePayment(0.03, `Agent behavior analysis for ${address}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const txListUrl = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=200&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const txData = await fetchWithCache(txListUrl).catch(() => ({ result: [] }));
+      
+      const transactions = txData.result || [];
+      
+      // 分析交易模式
+      const uniqueContracts = new Set(transactions.map(tx => tx.to).filter(Boolean));
+      const uniqueRecipients = new Set(transactions.map(tx => tx.to).filter(Boolean));
+      const avgValue = transactions.reduce((sum, tx) => sum + parseInt(tx.value || 0), 0) / (transactions.length || 1) / 1e18;
+      
+      // 判断行为模式
+      let pattern = 'inactive';
+      let confidence = 0.5;
+      const signals = [];
+      
+      if (transactions.length > 50) {
+        signals.push('frequent_transactions');
+        if (uniqueContracts.size > 10) {
+          pattern = 'active_trader';
+          signals.push('diverse_contracts');
+          confidence = 0.85;
+        } else {
+          pattern = 'focused_user';
+          confidence = 0.75;
+        }
+      } else if (transactions.length > 10) {
+        pattern = 'regular_user';
+        signals.push('moderate_activity');
+        confidence = 0.70;
+      } else if (transactions.length > 0) {
+        pattern = 'new_user';
+        signals.push('limited_history');
+        confidence = 0.60;
+      }
+      
+      // 失败率分析
+      const failedTx = transactions.filter(tx => tx.isError === '1').length;
+      if (failedTx / (transactions.length || 1) < 0.05) {
+        signals.push('low_failure_rate');
+      } else if (failedTx / (transactions.length || 1) > 0.2) {
+        signals.push('high_failure_rate');
+        confidence *= 0.7;
+      }
+      
+      res.json({
+        address,
+        pattern,
+        confidence: Math.round(confidence * 100) / 100,
+        signals,
+        stats: {
+          total_transactions: transactions.length,
+          unique_contracts: uniqueContracts.size,
+          avg_tx_value_eth: avgValue.toFixed(6),
+          failed_transactions: failedTx
+        },
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze agent behavior' });
+    }
+  }
+});
+
 // ─── OpenAPI / Discovery ──────────────────────────────
 
 // Favicon endpoint (fixes FAVICON_MISSING warning)
@@ -1250,6 +1435,50 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'Bridge estimate' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/agent/score/{address}': {
+        get: {
+          summary: 'AI Agent reputation score (PAID $0.05)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '50000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Agent reputation score' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/agent/behavior/{address}': {
+        get: {
+          summary: 'AI Agent behavior analysis (PAID $0.03)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.03' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '30000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Agent behavior analysis' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
@@ -1270,6 +1499,8 @@ app.get('/.well-known/x402', (req, res) => {
       `${origin}/api/weather/forecast/{city}`,
       `${origin}/api/security/address/{address}`,
       `${origin}/api/security/token/{address}`,
+      `${origin}/api/agent/score/{address}`,
+      `${origin}/api/agent/behavior/{address}`,
       `${origin}/api/dex/volume/{token}`,
       `${origin}/api/dex/trending`,
       `${origin}/api/bridge/status`,
