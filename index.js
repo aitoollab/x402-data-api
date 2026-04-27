@@ -950,7 +950,7 @@ app.get('/api/bridge/estimate', async (req, res) => {
 // Favicon endpoint (fixes FAVICON_MISSING warning)
 app.get('/favicon.ico', (req, res) => {
   // Professional x402 favicon
-  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#6366f1"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="Arial" font-weight="bold" font-size="12">x4</text></svg>`;
+  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#6366f1"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="Arial" font-weight="bold" font-size="12">XP</text></svg>`;
   res.setHeader('Content-Type', 'image/svg+xml');
   res.send(favicon);
 });
