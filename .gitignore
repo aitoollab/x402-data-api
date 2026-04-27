@@ -2,3 +2,7 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# 服务器生成的数据
+data/
+!data/.gitkeep
