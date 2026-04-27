@@ -1,67 +1,111 @@
 #!/bin/bash
-# x402 API 自动化监控脚本
-# 每日运行：检查生态动态、竞品分析、收益统计
+# x402 API 完整自动化管道
+# 每日运行：发现机会 → 评估 → 通知开发 → 监控健康 → 统计收益
 
 set -e
 
+SCRIPTS_DIR="$(dirname "$0")"
+DATA_DIR="$SCRIPTS_DIR/../data"
+TODAY=$(date +%Y-%m-%d)
 API_URL="https://api.aitoollab.top"
 WALLET="0x1D99D952eAd3E8907c9989D15303d3Bcc443Ef97"
-DATA_DIR="$(dirname "$0")/../data"
-TODAY=$(date +%Y-%m-%d)
 
 mkdir -p "$DATA_DIR"
 
-echo "=== x402 API Daily Monitor - $TODAY ==="
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║        x402 API Automation Pipeline - $TODAY         ║"
+echo "╚══════════════════════════════════════════════════════════╝"
 
-# 1. 检查 API 健康状态
-echo -e "\n[1/5] Checking API health..."
-HEALTH=$(curl -s "$API_URL/api/health" || echo '{"status":"error"}')
-echo "$HEALTH" | jq '.' 2>/dev/null || echo "$HEALTH"
+# ═══════════════════════════════════════════════════════════════
+# 1. 扫描 x402 生态
+# ═══════════════════════════════════════════════════════════════
+echo -e "\n[1/5] 🔍 Scanning x402 ecosystem..."
+node "$SCRIPTS_DIR/discovery.js" 2>&1 | tail -10
 
-# 2. 检查端点可用性
-echo -e "\n[2/5] Checking endpoints..."
-ENDPOINTS=(
-  "/api/crypto/price/btc"
-  "/api/crypto/trending"
-  "/api/crypto/market"
-  "/api/crypto/analysis/btc"
-  "/api/defi/yields"
-  "/api/defi/tvl"
-  "/api/weather/beijing"
-  "/api/weather/forecast/beijing"
-)
+# ═══════════════════════════════════════════════════════════════
+# 2. 评估机会
+# ═══════════════════════════════════════════════════════════════
+echo -e "\n[2/5] 📊 Assessing opportunities..."
+node "$SCRIPTS_DIR/opportunity-assessment.js" 2>&1 | tail -15
 
-for endpoint in "${ENDPOINTS[@]}"; do
-  STATUS=$(curl -sI "$API_URL$endpoint" | grep "HTTP" | head -1)
-  echo "  $endpoint: $STATUS"
+# ═══════════════════════════════════════════════════════════════
+# 3. 检查开发队列，生成通知
+# ═══════════════════════════════════════════════════════════════
+echo -e "\n[3/5] 📝 Checking development queue..."
+QUEUE_FILE="$DATA_DIR/opportunity-queue.json"
+
+if [ -f "$QUEUE_FILE" ]; then
+  QUEUE_COUNT=$(jq '.developmentQueue | length' "$QUEUE_FILE" 2>/dev/null || echo "0")
+  echo "  Opportunities in queue: $QUEUE_COUNT"
+  
+  if [ "$QUEUE_COUNT" -gt 0 ]; then
+    # 生成通知文件（Agent 下次运行时会检查）
+    NOTIFY_FILE="$DATA_DIR/pending-development.txt"
+    jq -r '.developmentQueue[] | "\(.rank). \(.category) (Score: \(.score)) - $\(.suggestedPrice)"' "$QUEUE_FILE" > "$NOTIFY_FILE"
+    echo "  ⚠️  New opportunities pending development!"
+    echo "  See: $NOTIFY_FILE"
+    cat "$NOTIFY_FILE"
+  fi
+else
+  echo "  No queue file found"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# 4. 监控端点健康
+# ═══════════════════════════════════════════════════════════════
+echo -e "\n[4/5] 🏥 Checking endpoint health..."
+
+# 获取端点列表
+ENDPOINTS=$(curl -s "$API_URL/.well-known/x402" | jq -r '.resources | length' 2>/dev/null || echo "0")
+echo "  Total endpoints: $ENDPOINTS"
+
+# 抽查关键端点
+HEALTHY=0
+FAILED=0
+for endpoint in "/api/crypto/price/btc" "/api/defi/yields" "/api/agent/score/0x1D99D952eAd3E8907c9989D15303d3Bcc443Ef97"; do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL$endpoint" 2>/dev/null || echo "000")
+  if [ "$CODE" = "402" ]; then
+    HEALTHY=$((HEALTHY + 1))
+    echo "  ✅ $endpoint: $CODE"
+  else
+    FAILED=$((FAILED + 1))
+    echo "  ❌ $endpoint: $CODE"
+  fi
 done
 
-# 3. 检查 x402scan 注册状态
-echo -e "\n[3/5] Checking x402scan registration..."
-curl -s "https://api.x402scan.com/v1/servers?wallet=$WALLET" 2>/dev/null | \
-  jq '.servers[] | {name: .name, endpoints: (.endpoints | length)}' 2>/dev/null || \
-  echo "  Unable to fetch x402scan data"
+echo "  Healthy: $HEALTHY, Failed: $FAILED"
 
-# 4. 统计今日调用量（从服务器日志）
-echo -e "\n[4/5] Request statistics..."
-echo "  Note: Check server logs for actual counts"
-echo "  Command: pm2 logs x402-api --lines 1000 | grep 'Payment received' | wc -l"
+# ═══════════════════════════════════════════════════════════════
+# 5. 统计收益（从链上数据）
+# ═══════════════════════════════════════════════════════════════
+echo -e "\n[5/5] 💰 Revenue tracking..."
+echo "  Wallet: $WALLET"
+echo "  Network: Base (eip155:8453)"
+echo "  To check: https://basescan.org/address/$WALLET"
 
-# 5. 竞品监控
-echo -e "\n[5/5] Competitor monitoring..."
-echo "  Top x402 categories: Weather, Crypto, AI"
-echo "  Our position: Crypto ✅, DeFi ✅, Weather ✅"
-
-# 生成报告
-REPORT="$DATA_DIR/daily_report_$TODAY.json"
+# ═══════════════════════════════════════════════════════════════
+# 生成每日报告
+# ═══════════════════════════════════════════════════════════════
+REPORT="$DATA_DIR/daily-pipeline-$TODAY.json"
 cat > "$REPORT" << EOF
 {
   "date": "$TODAY",
-  "api_status": "online",
-  "endpoints": 8,
-  "categories": ["crypto", "defi", "weather"],
+  "timestamp": "$(date -Iseconds)",
+  "pipeline": {
+    "discovery": "completed",
+    "assessment": "completed",
+    "queue_size": $QUEUE_COUNT
+  },
+  "health": {
+    "endpoints": $ENDPOINTS,
+    "healthy": $HEALTHY,
+    "failed": $FAILED
+  },
   "wallet": "$WALLET"
 }
 EOF
 
-echo -e "\n=== Report saved to $REPORT ==="
+echo -e "\n╔══════════════════════════════════════════════════════════╗"
+echo "║                   Pipeline Complete ✅                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo "Report: $REPORT"

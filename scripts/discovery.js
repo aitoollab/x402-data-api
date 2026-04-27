@@ -1,26 +1,50 @@
 #!/usr/bin/env node
 /**
- * x402 生态发现脚本
- * 自动扫描 x402scan 生态系统，发现机会
+ * x402 生态发现脚本 v2
+ * 扫描 x402scan 生态系统，发现机会，保存结果到文件
  */
 
+const fs = require('fs');
+const path = require('path');
+
 const API_URL = 'https://api.x402scan.com/v1';
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const OUTPUT_FILE = path.join(DATA_DIR, 'discovery-results.json');
+
+// 确保数据目录存在
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 
 async function fetchAPI(endpoint) {
   const res = await fetch(`${API_URL}${endpoint}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 async function analyzeEcosystem() {
-  console.log('=== x402 Ecosystem Discovery ===\n');
+  console.log('=== x402 Ecosystem Discovery v2 ===\n');
+  
+  const results = {
+    timestamp: new Date().toISOString(),
+    stats: {},
+    categories: [],
+    gaps: [],
+    priceAnalysis: {},
+    recommendations: []
+  };
   
   try {
     // 1. 获取生态统计
     console.log('[1/4] Fetching ecosystem stats...');
     const stats = await fetchAPI('/stats');
-    console.log(`  Total APIs: ${stats.totalAPIs || 'N/A'}`);
-    console.log(`  Total Volume: $${stats.totalVolume || 'N/A'}`);
-    console.log(`  Total Transactions: ${stats.totalTransactions || 'N/A'}`);
+    results.stats = {
+      totalAPIs: stats.totalAPIs || 0,
+      totalVolume: stats.totalVolume || 0,
+      totalTransactions: stats.totalTransactions || 0
+    };
+    console.log(`  Total APIs: ${results.stats.totalAPIs}`);
+    console.log(`  Total Volume: $${results.stats.totalVolume}`);
     
     // 2. 分析热门分类
     console.log('\n[2/4] Analyzing popular categories...');
@@ -32,28 +56,31 @@ async function analyzeEcosystem() {
       categories[cat] = (categories[cat] || 0) + 1;
     });
     
-    const sortedCategories = Object.entries(categories)
+    results.categories = Object.entries(categories)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
+      .map(([name, count]) => ({
+        name,
+        count,
+        competition: count > 10 ? 'HIGH' : count > 3 ? 'MEDIUM' : 'LOW'
+      }));
     
-    console.log('  Top categories:');
-    sortedCategories.forEach(([cat, count], i) => {
-      console.log(`    ${i + 1}. ${cat}: ${count} APIs`);
-    });
+    console.log('  Top categories:', results.categories.slice(0, 5).map(c => c.name).join(', '));
     
-    // 3. 发现竞争空白
-    console.log('\n[3/4] Finding gaps...');
+    // 3. 发现竞争空白（我们没覆盖的热门分类）
+    console.log('\n[3/4] Finding opportunity gaps...');
+    const ourCategories = ['crypto', 'defi', 'weather', 'security', 'agent', 'whale', 'dex', 'bridge'];
     
-    const ourCategories = ['crypto', 'defi', 'weather'];
-    const missingCategories = sortedCategories
-      .filter(([cat]) => !ourCategories.includes(cat.toLowerCase()))
-      .slice(0, 5);
+    results.gaps = results.categories
+      .filter(cat => !ourCategories.includes(cat.name.toLowerCase()))
+      .slice(0, 10)
+      .map(cat => ({
+        category: cat.name,
+        competitors: cat.count,
+        competition: cat.competition,
+        opportunity: cat.competition === 'LOW' ? 'HIGH' : cat.competition === 'MEDIUM' ? 'MEDIUM' : 'LOW'
+      }));
     
-    console.log('  Opportunity gaps:');
-    missingCategories.forEach(([cat, count]) => {
-      const competition = count > 10 ? 'HIGH' : count > 3 ? 'MEDIUM' : 'LOW';
-      console.log(`    - ${cat}: ${count} competitors (${competition} competition)`);
-    });
+    console.log(`  Found ${results.gaps.length} gaps`);
     
     // 4. 价格分析
     console.log('\n[4/4] Price analysis...');
@@ -62,25 +89,46 @@ async function analyzeEcosystem() {
     ).filter(p => p > 0) || [];
     
     if (prices.length > 0) {
-      const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      
-      console.log(`  Average price: $${avgPrice.toFixed(3)}`);
-      console.log(`  Price range: $${minPrice.toFixed(3)} - $${maxPrice.toFixed(3)}`);
+      results.priceAnalysis = {
+        average: (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(3),
+        min: Math.min(...prices).toFixed(3),
+        max: Math.max(...prices).toFixed(3),
+        median: prices.sort((a, b) => a - b)[Math.floor(prices.length / 2)].toFixed(3)
+      };
+      console.log(`  Average price: $${results.priceAnalysis.average}`);
     }
     
-    // 生成机会报告
-    console.log('\n=== Recommendations ===');
-    console.log('1. Focus on low-competition categories');
-    console.log('2. Price competitively around average');
-    console.log('3. Add unique value (aggregation, analysis)');
+    // 5. 生成推荐
+    results.recommendations = results.gaps
+      .filter(gap => gap.opportunity === 'HIGH' || gap.opportunity === 'MEDIUM')
+      .map(gap => ({
+        category: gap.category,
+        reason: `Low competition (${gap.competitors} competitors)`,
+        priority: gap.opportunity === 'HIGH' ? 1 : 2
+      }));
+    
+    // 保存结果
+    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(results, null, 2));
+    console.log(`\n✅ Results saved to ${OUTPUT_FILE}`);
+    
+    // 输出摘要
+    console.log('\n=== Summary ===');
+    console.log(`Total APIs in ecosystem: ${results.stats.totalAPIs}`);
+    console.log(`Opportunity gaps found: ${results.gaps.length}`);
+    console.log(`High priority opportunities: ${results.recommendations.filter(r => r.priority === 1).length}`);
+    
+    return results;
     
   } catch (error) {
     console.error('Error:', error.message);
-    console.log('\nFallback: Manual analysis needed');
-    console.log('Visit: https://www.x402scan.com/ecosystem');
+    
+    // 保存错误信息
+    results.error = error.message;
+    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(results, null, 2));
+    
+    throw error;
   }
 }
 
-analyzeEcosystem();
+// 执行
+analyzeEcosystem().catch(() => process.exit(1));
