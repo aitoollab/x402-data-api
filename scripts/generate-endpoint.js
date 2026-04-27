@@ -157,7 +157,7 @@ function main() {
   
   if (!fs.existsSync(QUEUE_FILE)) {
     console.log('No opportunity queue found. Run opportunity-assessment.js first.');
-    return;
+    return { generated: 0, passed: false };
   }
   
   const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
@@ -165,7 +165,7 @@ function main() {
   
   if (opportunities.length === 0) {
     console.log('No opportunities in queue.');
-    return;
+    return { generated: 0, passed: false };
   }
   
   console.log(`Found ${opportunities.length} opportunities to develop\n`);
@@ -211,13 +211,33 @@ function main() {
   console.log(`Files saved to: ${GENERATED_DIR}`);
   console.log(`Report: ${reportFile}`);
   
+  // 自动审查
   if (generated.length > 0) {
-    console.log(`\n⚠️  Next steps:`);
-    console.log(`1. Review generated code`);
-    console.log(`2. Add endpoints to index.js`);
-    console.log(`3. Update openapi.json`);
-    console.log(`4. git push && server auto-update`);
+    console.log(`\n=== Auto Review ===`);
+    console.log('Running code review...\n');
+    
+    const { reviewAllEndpoints } = require('./review-endpoints.js');
+    const reviewReport = reviewAllEndpoints();
+    
+    if (reviewReport.allPassed) {
+      console.log('\n✅ All generated endpoints passed review!');
+      console.log('Ready for commit.');
+      return { generated: generated.length, passed: true, reviewReport };
+    } else {
+      console.log('\n❌ Some endpoints failed review.');
+      console.log('Please fix errors before commit.');
+      return { generated: generated.length, passed: false, reviewReport };
+    }
   }
+  
+  return { generated: 0, passed: false };
 }
 
-main();
+// 导出
+module.exports = { main, generateEndpoint, selectTemplate };
+
+// 执行
+if (require.main === module) {
+  const result = main();
+  process.exit(result.passed ? 0 : 1);
+}

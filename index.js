@@ -1665,6 +1665,9 @@ app.get('/openapi.json', (req, res) => {
   });
 });
 
+// === ENDPOINTS END ===
+// 新端点将在此标记之前自动插入
+
 app.get('/.well-known/x402', (req, res) => {
   const origin = `https://${req.get('host')}`;
   res.json({
