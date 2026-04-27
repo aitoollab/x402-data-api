@@ -947,13 +947,27 @@ app.get('/api/bridge/estimate', async (req, res) => {
 
 // ─── OpenAPI / Discovery ──────────────────────────────
 
+// Favicon endpoint (fixes FAVICON_MISSING warning)
+app.get('/favicon.ico', (req, res) => {
+  // Simple SVG favicon
+  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🦞</text></svg>`;
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.send(favicon);
+});
+
 app.get('/openapi.json', (req, res) => {
   res.json({
     openapi: '3.0.0',
     info: {
       title: 'x402 Crypto Data API',
       description: 'Real-time cryptocurrency data with micropayments.',
-      version: '2.0.0'
+      version: '2.1.0',
+      'x-guidance': {
+        usage: 'Pay per request with USDC on Base network. All endpoints return JSON data.',
+        payment: 'Send payment via x402 protocol. Include X-PAYMENT header with base64-encoded payment payload.',
+        supported_assets: ['USDC on Base'],
+        pricing_note: 'Prices are in USD. Payments are processed in USDC with 6 decimals.'
+      }
     },
     'x-discovery': {
       ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
@@ -963,11 +977,12 @@ app.get('/openapi.json', (req, res) => {
         get: {
           summary: 'Real-time crypto price (PAID $0.01)',
           parameters: [
-            { name: 'symbol', in: 'path', required: true, schema: { type: 'string' } }
+            { name: 'symbol', in: 'path', required: true, schema: { type: 'string', description: 'Crypto symbol (btc, eth, sol, etc.)' } }
           ],
           'x-payment-info': {
             protocols: [{ x402: {} }],
             price: { mode: 'fixed', currency: 'USD', amount: '0.01' },
+            input: { type: 'http', method: 'GET', pathParams: ['symbol'] },
             accepts: [{
               scheme: 'exact',
               network: NETWORK,
@@ -986,6 +1001,7 @@ app.get('/openapi.json', (req, res) => {
           'x-payment-info': {
             protocols: [{ x402: {} }],
             price: { mode: 'fixed', currency: 'USD', amount: '0.01' },
+            input: { type: 'http', method: 'GET' },
             accepts: [{
               scheme: 'exact',
               network: NETWORK,
@@ -1004,6 +1020,7 @@ app.get('/openapi.json', (req, res) => {
           'x-payment-info': {
             protocols: [{ x402: {} }],
             price: { mode: 'fixed', currency: 'USD', amount: '0.02' },
+            input: { type: 'http', method: 'GET' },
             accepts: [{
               scheme: 'exact',
               network: NETWORK,
@@ -1020,11 +1037,12 @@ app.get('/openapi.json', (req, res) => {
         get: {
           summary: 'Technical analysis (PAID $0.05)',
           parameters: [
-            { name: 'symbol', in: 'path', required: true, schema: { type: 'string' } }
+            { name: 'symbol', in: 'path', required: true, schema: { type: 'string', description: 'Crypto symbol for analysis' } }
           ],
           'x-payment-info': {
             protocols: [{ x402: {} }],
             price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            input: { type: 'http', method: 'GET', pathParams: ['symbol'] },
             accepts: [{
               scheme: 'exact',
               network: NETWORK,
@@ -1043,6 +1061,7 @@ app.get('/openapi.json', (req, res) => {
           'x-payment-info': {
             protocols: [{ x402: {} }],
             price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            input: { type: 'http', method: 'GET' },
             accepts: [{
               scheme: 'exact',
               network: NETWORK,
