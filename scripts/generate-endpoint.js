@@ -1,0 +1,223 @@
+#!/usr/bin/env node
+/**
+ * API 端点自动生成器
+ * 根据机会队列自动生成新端点代码
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const QUEUE_FILE = path.join(DATA_DIR, 'opportunity-queue.json');
+const INDEX_FILE = path.join(__dirname, '..', 'index.js');
+const GENERATED_DIR = path.join(DATA_DIR, 'generated');
+
+// 确保目录存在
+if (!fs.existsSync(GENERATED_DIR)) {
+  fs.mkdirSync(GENERATED_DIR, { recursive: true });
+}
+
+// 端点模板（基于已验证的 18 个端点）
+const ENDPOINT_TEMPLATES = {
+  // 数据聚合类（天气、加密货币等）
+  dataAggregation: (config) => `
+// ${config.category} API
+app.get('/api/${config.category}/${config.endpoint}', async (req, res) => {
+  const outputExample = ${JSON.stringify(config.exampleOutput, null, 2)};
+  
+  const gate = requirePayment(${config.price}, '${config.description}', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 从数据源获取数据
+      const data = await fetchWithCache('${config.dataSource}');
+      
+      // 处理数据
+      const processed = ${config.processLogic || 'data'};
+      
+      res.json({
+        ...processed,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch data' });
+    }
+  }
+});`,
+
+  // 地址分析类（Agent 评分、巨鲸追踪等）
+  addressAnalysis: (config) => `
+// ${config.category} API
+app.get('/api/${config.category}/${config.endpoint}/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = ${JSON.stringify(config.exampleOutput, null, 2)};
+  
+  const gate = requirePayment(${config.price}, '${config.description} for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用 Etherscan 获取链上数据
+      const txListUrl = \`\${ETHERSCAN_API}?module=account&action=txlist&address=\${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=\${ETHERSCAN_KEY}\`;
+      const data = await fetchWithCache(txListUrl);
+      
+      const transactions = data.result || [];
+      
+      // 分析逻辑
+      const analysis = ${config.analysisLogic || '{}'};
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});`,
+
+  // 简单查询类（DEX、DeFi 等）
+  simpleQuery: (config) => `
+// ${config.category} API
+app.get('/api/${config.category}/${config.endpoint}', async (req, res) => {
+  const outputExample = ${JSON.stringify(config.exampleOutput, null, 2)};
+  
+  const gate = requirePayment(${config.price}, '${config.description}', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const data = await fetchWithCache('${config.dataSource}');
+      
+      res.json({
+        data,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch data' });
+    }
+  }
+});`
+};
+
+// 根据类别选择模板
+function selectTemplate(category) {
+  const addressCategories = ['agent', 'whale', 'security', 'address'];
+  const dataCategories = ['weather', 'crypto', 'nft'];
+  
+  if (addressCategories.some(c => category.toLowerCase().includes(c))) {
+    return 'addressAnalysis';
+  }
+  if (dataCategories.some(c => category.toLowerCase().includes(c))) {
+    return 'dataAggregation';
+  }
+  return 'simpleQuery';
+}
+
+// 生成端点配置
+function generateEndpointConfig(opportunity) {
+  const template = selectTemplate(opportunity.category);
+  
+  return {
+    category: opportunity.category.toLowerCase().replace(/\s+/g, '-'),
+    endpoint: opportunity.category.toLowerCase().replace(/\s+/g, '-'),
+    price: opportunity.suggestedPrice,
+    description: opportunity.description || `${opportunity.category} API`,
+    template,
+    exampleOutput: { result: 'example' },
+    dataSource: 'https://api.example.com/data',
+    processLogic: 'data',
+    analysisLogic: '{ score: 50 }'
+  };
+}
+
+// 生成端点代码
+function generateEndpoint(opportunity) {
+  const config = generateEndpointConfig(opportunity);
+  const template = ENDPOINT_TEMPLATES[config.template];
+  
+  if (!template) {
+    console.error(`No template found for ${config.template}`);
+    return null;
+  }
+  
+  return {
+    code: template(config),
+    config,
+    route: `/api/${config.category}/${config.endpoint}`
+  };
+}
+
+// 主函数
+function main() {
+  console.log('=== API Endpoint Generator ===\n');
+  
+  if (!fs.existsSync(QUEUE_FILE)) {
+    console.log('No opportunity queue found. Run opportunity-assessment.js first.');
+    return;
+  }
+  
+  const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
+  const opportunities = queue.developmentQueue || [];
+  
+  if (opportunities.length === 0) {
+    console.log('No opportunities in queue.');
+    return;
+  }
+  
+  console.log(`Found ${opportunities.length} opportunities to develop\n`);
+  
+  const generated = [];
+  
+  opportunities.forEach((opp, i) => {
+    console.log(`[${i + 1}/${opportunities.length}] Generating: ${opp.category}`);
+    
+    const result = generateEndpoint(opp);
+    
+    if (result) {
+      // 保存生成的代码
+      const filename = `endpoint-${opp.category.toLowerCase().replace(/\s+/g, '-')}.js`;
+      const filepath = path.join(GENERATED_DIR, filename);
+      
+      fs.writeFileSync(filepath, result.code);
+      
+      generated.push({
+        category: opp.category,
+        route: result.route,
+        file: filename,
+        price: opp.suggestedPrice
+      });
+      
+      console.log(`  ✅ Generated: ${result.route}`);
+    }
+  });
+  
+  // 生成汇总报告
+  const report = {
+    timestamp: new Date().toISOString(),
+    generated: generated.length,
+    endpoints: generated,
+    nextStep: 'Review generated code in data/generated/, then add to index.js'
+  };
+  
+  const reportFile = path.join(DATA_DIR, 'generated-endpoints.json');
+  fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
+  
+  console.log(`\n=== Summary ===`);
+  console.log(`Generated: ${generated.length} endpoints`);
+  console.log(`Files saved to: ${GENERATED_DIR}`);
+  console.log(`Report: ${reportFile}`);
+  
+  if (generated.length > 0) {
+    console.log(`\n⚠️  Next steps:`);
+    console.log(`1. Review generated code`);
+    console.log(`2. Add endpoints to index.js`);
+    console.log(`3. Update openapi.json`);
+    console.log(`4. git push && server auto-update`);
+  }
+}
+
+main();
