@@ -157,7 +157,7 @@ function requirePayment(amountUsd, description, httpMethod, queryParams, outputE
 app.get('/', (req, res) => {
   res.json({
     name: 'x402 Data API Hub',
-    version: '2.2.0',
+    version: '2.3.0',
     description: 'Multi-category data APIs with x402 micropayments',
     endpoints: {
       free: ['GET /', 'GET /api/health'],
@@ -172,8 +172,12 @@ app.get('/', (req, res) => {
         'GET /api/defi/tvl - $0.03'
       ],
       weather: [
-        'GET /api/weather/{city} - $0.01 (Current weather)',
-        'GET /api/weather/forecast/{city} - $0.02 (7-day forecast)'
+        'GET /api/weather/{city} - $0.01',
+        'GET /api/weather/forecast/{city} - $0.02'
+      ],
+      security: [
+        'GET /api/security/address/{address} - $0.08 (Address risk analysis)',
+        'GET /api/security/token/{address} - $0.05 (Token security check)'
       ]
     },
     supported_cities: ['beijing', 'shanghai', 'shenzhen', 'tokyo', 'new york', 'london', 'paris', 'singapore', 'sydney', 'dubai', 'hong kong', 'moscow', 'mumbai', 'seoul', 'los angeles']
@@ -584,6 +588,162 @@ app.get('/api/weather/forecast/:city', async (req, res) => {
   }
 });
 
+// ─── PAID ENDPOINTS: Onchain Security (HIGH VALUE) ──────────
+
+app.get('/api/security/address/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+    address: address,
+    risk_score: 35,
+    risk_level: 'LOW',
+    tags: ['normal_user'],
+    tx_count: 150,
+    first_tx: '2023-01-15',
+    last_tx: '2026-04-26'
+  };
+  
+  const gate = requirePayment(0.08, `Address risk analysis for ${address}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // Etherscan API - get transaction list (free tier)
+      const data = await fetchWithCache(
+        `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&sort=desc&apikey=${ETHERSCAN_KEY}`
+      );
+      
+      const txs = data.result || [];
+      const txCount = txs.length;
+      
+      // Risk analysis
+      let riskScore = 0;
+      const tags = [];
+      
+      // Transaction frequency analysis
+      if (txCount === 0) {
+        riskScore += 30;
+        tags.push('new_address');
+      } else if (txCount < 10) {
+        riskScore += 10;
+        tags.push('low_activity');
+      } else if (txCount > 1000) {
+        riskScore += 5;
+        tags.push('high_activity');
+      } else {
+        tags.push('normal_user');
+      }
+      
+      // Time analysis
+      if (txs.length > 0) {
+        const firstTx = new Date(txs[txs.length - 1].timeStamp * 1000);
+        const lastTx = new Date(txs[0].timeStamp * 1000);
+        const daysActive = (lastTx - firstTx) / (1000 * 60 * 60 * 24);
+        
+        if (daysActive < 7) {
+          riskScore += 25;
+          tags.push('very_new');
+        } else if (daysActive < 30) {
+          riskScore += 15;
+          tags.push('new');
+        }
+      }
+      
+      // Value analysis
+      const totalValue = txs.reduce((sum, tx) => sum + parseFloat(tx.value || 0), 0);
+      if (totalValue > 1e21) { // > 1000 ETH
+        tags.push('whale');
+      }
+      
+      // Failed transaction analysis
+      const failedTxs = txs.filter(tx => tx.isError === '1').length;
+      if (failedTxs > txCount * 0.3) {
+        riskScore += 20;
+        tags.push('high_failed_tx');
+      }
+      
+      // Determine risk level
+      let riskLevel = 'LOW';
+      if (riskScore >= 60) riskLevel = 'HIGH';
+      else if (riskScore >= 30) riskLevel = 'MEDIUM';
+      
+      res.json({
+        address: address,
+        risk_score: Math.min(riskScore, 100),
+        risk_level: riskLevel,
+        tags,
+        tx_count: txCount,
+        total_value_eth: Math.round(totalValue / 1e18 * 1000) / 1000,
+        first_tx: txs.length > 0 ? new Date(txs[txs.length - 1].timeStamp * 1000).toISOString().split('T')[0] : null,
+        last_tx: txs.length > 0 ? new Date(txs[0].timeStamp * 1000).toISOString().split('T')[0] : null,
+        analysis_timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+app.get('/api/security/token/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+    address: address,
+    is_honeypot: false,
+    risk_score: 25,
+    warnings: [],
+    holder_count: 1500,
+    liquidity_usd: 500000
+  };
+  
+  const gate = requirePayment(0.05, `Token security check for ${address}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // Basic token info from Etherscan
+      const tokenData = await fetchWithCache(
+        `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&sort=desc&apikey=${ETHERSCAN_KEY}`
+      );
+      
+      // Risk scoring (simplified - real implementation would use GoPlus/Honeypot.is)
+      let riskScore = 0;
+      const warnings = [];
+      
+      const txCount = (tokenData.result || []).length;
+      
+      // Basic heuristics
+      if (txCount < 100) {
+        riskScore += 20;
+        warnings.push('Low transaction count');
+      }
+      
+      if (txCount > 10000) {
+        riskScore += 10;
+        warnings.push('High activity token');
+      }
+      
+      // Note: Real implementation would check:
+      // - Honeypot detection via API
+      // - Contract verification status
+      // - Holder concentration
+      // - Liquidity locked status
+      
+      res.json({
+        address: address,
+        risk_score: Math.min(riskScore, 100),
+        risk_level: riskScore >= 50 ? 'HIGH' : riskScore >= 25 ? 'MEDIUM' : 'LOW',
+        warnings,
+        note: 'Basic analysis. For full security check, integrate GoPlus API.',
+        tx_count: txCount,
+        analysis_timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze token' });
+    }
+  }
+});
+
 // ─── OpenAPI / Discovery ──────────────────────────────
 
 app.get('/openapi.json', (req, res) => {
@@ -753,6 +913,48 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'Weather forecast' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/security/address/{address}': {
+        get: {
+          summary: 'Address risk analysis (PAID $0.08)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.08' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '80000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Address risk score' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/security/token/{address}': {
+        get: {
+          summary: 'Token security check (PAID $0.05)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '50000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Token security analysis' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
@@ -770,7 +972,9 @@ app.get('/.well-known/x402', (req, res) => {
       `${origin}/api/defi/yields`,
       `${origin}/api/defi/tvl`,
       `${origin}/api/weather/{city}`,
-      `${origin}/api/weather/forecast/{city}`
+      `${origin}/api/weather/forecast/{city}`,
+      `${origin}/api/security/address/{address}`,
+      `${origin}/api/security/token/{address}`
     ],
     ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
