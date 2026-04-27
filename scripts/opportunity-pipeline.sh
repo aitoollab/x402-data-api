@@ -90,3 +90,9 @@ echo "Report: $REPORT"
 if [ "$REVIEW_PASSED" = true ] && [ "$NEW_COUNT" -gt 0 ]; then
   echo -e "\n🎉 New endpoints ready! Server will update at 5:30."
 fi
+
+# ═══════════════════════════════════════════════════════════════════
+# 发送飞书通知
+# ═══════════════════════════════════════════════════════════════════
+NOTIFY_MSG="管道执行完成\n审查: $([ "$REVIEW_PASSED" = true ] && echo "✅ 通过" || echo "❌ 未通过")\n新端点: ${NEW_COUNT:-0} 个\n报告: $REPORT"
+node "$SCRIPTS_DIR/notify-feishu.js" pipeline "机会发现管道 - $TODAY" "$NOTIFY_MSG" 2>/dev/null || true

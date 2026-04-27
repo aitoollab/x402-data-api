@@ -119,3 +119,14 @@ if [ "$FAILED" -gt 0 ]; then
   echo -e "\n⚠️  WARNING: $FAILED endpoint(s) failed health check!"
   echo "Failed: $FAILED_ENDPOINTS"
 fi
+
+# ═══════════════════════════════════════════════════════════════════
+# 发送飞书通知
+# ═══════════════════════════════════════════════════════════════════
+NOTIFY_MSG="端点总数: $ENDPOINTS\n健康: $HEALTHY | 失败: $FAILED\nx402scan 注册: $REGISTERED\n状态: $([ "$FAILED" -gt 0 ] && echo "⚠️ 异常" || echo "✅ 正常")"
+node "$SCRIPTS_DIR/notify-feishu.js" daily "运维监控 - $TODAY" "$NOTIFY_MSG" 2>/dev/null || true
+
+# 如果有异常，额外发送告警
+if [ "$FAILED" -gt 0 ]; then
+  node "$SCRIPTS_DIR/notify-feishu.js" alert "端点异常告警" "失败端点: $FAILED_ENDPOINTS" 2>/dev/null || true
+fi
