@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * 端点代码审查器
- * 自动对比新生成的代码和现有端点，确保质量
+ * 端点代码审查器 v2
+ * 自动对比新生成的代码和已验证的端点，确保质量
  */
 
 const fs = require('fs');
@@ -11,123 +11,255 @@ const GENERATED_DIR = path.join(__dirname, '..', 'data', 'generated');
 const INDEX_FILE = path.join(__dirname, '..', 'index.js');
 const REVIEW_FILE = path.join(__dirname, '..', 'data', 'review-report.json');
 
-// 审查规则
-const REVIEW_RULES = [
-  {
-    name: 'hasRequirePayment',
-    description: '必须包含 requirePayment 调用',
-    check: (code) => code.includes('requirePayment('),
-    severity: 'error'
-  },
-  {
-    name: 'hasGateResult',
-    description: '必须检查 gate 返回值',
-    check: (code) => code.includes("if (result === 'paid')"),
-    severity: 'error'
-  },
-  {
-    name: 'hasErrorHandling',
-    description: '必须有错误处理',
-    check: (code) => code.includes('try {') && code.includes('catch (error)'),
-    severity: 'error'
-  },
-  {
-    name: 'hasJsonResponse',
-    description: '必须返回 JSON 响应',
-    check: (code) => code.includes('res.json('),
-    severity: 'error'
-  },
-  {
-    name: 'hasTimestamp',
-    description: '应包含时间戳',
-    check: (code) => code.includes('last_updated') || code.includes('timestamp'),
-    severity: 'warning'
-  },
-  {
-    name: 'hasOutputExample',
-    description: '必须定义输出示例',
-    check: (code) => code.includes('outputExample'),
-    severity: 'error'
-  },
-  {
-    name: 'validRoute',
-    description: '路由格式必须正确',
-    check: (code) => /app\.(get|post)\s*\(\s*['"]\/api\//.test(code),
-    severity: 'error'
-  },
-  {
-    name: 'noHardcodedData',
-    description: '不应有硬编码数据',
-    check: (code) => !code.includes('"example"') || code.includes('outputExample'),
-    severity: 'warning'
-  }
-];
+// ═══════════════════════════════════════════════════════════════════
+// 从 index.js 提取已验证的端点代码作为模板
+// ═══════════════════════════════════════════════════════════════════
 
-// 从现有 index.js 提取端点模式
-function extractExistingPatterns() {
+function extractVerifiedEndpoints() {
   const indexContent = fs.readFileSync(INDEX_FILE, 'utf8');
   
-  // 提取所有端点定义
-  const endpointRegex = /app\.(get|post)\s*\(\s*['"]([^'"]+)['"]/g;
-  const endpoints = [];
-  let match;
-  
-  while ((match = endpointRegex.exec(indexContent)) !== null) {
-    endpoints.push({
-      method: match[1].toUpperCase(),
-      route: match[2]
-    });
-  }
-  
-  return {
-    totalEndpoints: endpoints.length,
-    endpoints,
-    patterns: {
-      hasRequirePayment: indexContent.includes('requirePayment('),
-      hasGatePattern: indexContent.includes("if (result === 'paid')"),
-      hasTryCatch: indexContent.includes('try {') && indexContent.includes('catch (error)')
+  // 按类别提取已验证的端点
+  const templates = {
+    // 地址分析类（Agent评分、巨鲸追踪、安全分析）
+    addressAnalysis: {
+      examples: ['/api/agent/score/', '/api/whale/address/', '/api/security/address/'],
+      pattern: /app\.get\('\/api\/(agent|whale|security)\/[^']+\/:address'/g,
+      requiredPatterns: [
+        /req\.params\.address/,
+        /requirePayment\(/,
+        /if \(result === 'paid'\)/,
+        /fetchWithCache\(/,
+        /try \{/,
+        /catch \(error\)/,
+        /res\.json\(/
+      ],
+      structure: [
+        '获取地址参数',
+        '定义输出示例',
+        '调用支付验证',
+        '检查支付结果',
+        '获取链上数据',
+        '处理数据',
+        '返回结果'
+      ]
+    },
+    
+    // 数据聚合类（天气、加密货币）
+    dataAggregation: {
+      examples: ['/api/weather/', '/api/crypto/price/', '/api/crypto/trending'],
+      pattern: /app\.get\('\/api\/(weather|crypto)\/[^']+'/g,
+      requiredPatterns: [
+        /requirePayment\(/,
+        /if \(result === 'paid'\)/,
+        /fetchWithCache\(/,
+        /try \{/,
+        /catch \(error\)/,
+        /res\.json\(/
+      ],
+      structure: [
+        '定义输出示例',
+        '调用支付验证',
+        '检查支付结果',
+        '获取外部数据',
+        '返回结果'
+      ]
+    },
+    
+    // 简单查询类（DEX、DeFi）
+    simpleQuery: {
+      examples: ['/api/defi/yields', '/api/defi/tvl', '/api/dex/volume/'],
+      pattern: /app\.get\('\/api\/(defi|dex|bridge)\/[^']+'/g,
+      requiredPatterns: [
+        /requirePayment\(/,
+        /if \(result === 'paid'\)/,
+        /fetchWithCache\(/,
+        /try \{/,
+        /catch \(error\)/,
+        /res\.json\(/
+      ],
+      structure: [
+        '定义输出示例',
+        '调用支付验证',
+        '检查支付结果',
+        '获取数据',
+        '返回结果'
+      ]
     }
   };
+  
+  // 提取每个类别的实际代码片段
+  Object.keys(templates).forEach(category => {
+    const template = templates[category];
+    const matches = indexContent.match(template.pattern) || [];
+    template.foundEndpoints = matches.map(m => {
+      // 提取端点名
+      const match = m.match(/app\.get\('([^']+)'/);
+      return match ? match[1] : m;
+    });
+  });
+  
+  return templates;
 }
 
-// 审查单个文件
-function reviewFile(filepath) {
-  const code = fs.readFileSync(filepath, 'utf8');
-  const filename = path.basename(filepath);
+// ═══════════════════════════════════════════════════════════════════
+// 确定新端点属于哪个类别
+// ═══════════════════════════════════════════════════════════════════
+
+function classifyEndpoint(code) {
+  // 地址分析类：有 :address 参数
+  if (code.includes('/:address') || code.includes('req.params.address')) {
+    return 'addressAnalysis';
+  }
   
-  const results = {
-    file: filename,
-    passed: true,
-    errors: [],
-    warnings: [],
-    checks: []
-  };
+  // 数据聚合类：有城市、符号等参数
+  if (code.includes('/:city') || code.includes('/:symbol') || code.includes('/:token')) {
+    return 'dataAggregation';
+  }
   
-  REVIEW_RULES.forEach(rule => {
-    const passed = rule.check(code);
-    results.checks.push({
-      rule: rule.name,
-      description: rule.description,
-      passed,
-      severity: rule.severity
+  // 简单查询类：无参数或只有查询参数
+  return 'simpleQuery';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 对比审查：将新生成的代码与已验证的端点对比
+// ═══════════════════════════════════════════════════════════════════
+
+function compareWithVerified(code, category, verifiedTemplates) {
+  const template = verifiedTemplates[category];
+  const issues = [];
+  const checks = [];
+  
+  if (!template) {
+    return {
+      passed: false,
+      issues: [{ severity: 'error', message: `Unknown category: ${category}` }],
+      checks
+    };
+  }
+  
+  // 1. 检查必需的模式
+  template.requiredPatterns.forEach((pattern, i) => {
+    const found = pattern.test(code);
+    const patternName = pattern.toString().slice(0, 50);
+    
+    checks.push({
+      name: `pattern_${i}`,
+      description: `必需模式: ${patternName}`,
+      passed: found,
+      severity: 'error'
     });
     
-    if (!passed) {
-      if (rule.severity === 'error') {
-        results.errors.push(rule.description);
-        results.passed = false;
-      } else {
-        results.warnings.push(rule.description);
-      }
+    if (!found) {
+      issues.push({
+        severity: 'error',
+        message: `缺少必需模式: ${patternName}`
+      });
     }
   });
   
-  return results;
+  // 2. 检查代码结构
+  const structureChecks = [
+    { name: 'hasParams', pattern: /req\.params\./, description: '参数获取' },
+    { name: 'hasOutputExample', pattern: /outputExample/, description: '输出示例定义' },
+    { name: 'hasPaymentGate', pattern: /if \(result === 'paid'\)/, description: '支付检查' },
+    { name: 'hasDataFetch', pattern: /fetchWithCache\(|fetch\(/, description: '数据获取' },
+    { name: 'hasJsonResponse', pattern: /res\.json\(/, description: 'JSON响应' }
+  ];
+  
+  structureChecks.forEach(check => {
+    const found = check.pattern.test(code);
+    checks.push({
+      name: check.name,
+      description: check.description,
+      passed: found,
+      severity: found ? 'info' : 'warning'
+    });
+  });
+  
+  // 3. 对比相似度
+  const indexContent = fs.readFileSync(INDEX_FILE, 'utf8');
+  
+  // 计算与已验证端点的相似度
+  let maxSimilarity = 0;
+  let mostSimilarEndpoint = '';
+  
+  if (template.foundEndpoints && template.foundEndpoints.length > 0) {
+    template.foundEndpoints.forEach(endpoint => {
+      // 提取已验证端点的代码片段
+      const endpointPattern = new RegExp(
+        `app\\.get\\('${endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^}]+}\\);`,
+        'gs'
+      );
+      const match = indexContent.match(endpointPattern);
+      
+      if (match) {
+        // 简单相似度计算：共同关键词
+        const verifiedCode = match[0];
+        const newKeywords = code.split(/\s+/).filter(w => w.length > 5);
+        const verifiedKeywords = verifiedCode.split(/\s+/).filter(w => w.length > 5);
+        const common = newKeywords.filter(w => verifiedKeywords.includes(w));
+        const similarity = common.length / Math.max(newKeywords.length, 1);
+        
+        if (similarity > maxSimilarity) {
+          maxSimilarity = similarity;
+          mostSimilarEndpoint = endpoint;
+        }
+      }
+    });
+  }
+  
+  checks.push({
+    name: 'similarity',
+    description: `与已验证端点 ${mostSimilarEndpoint} 相似度`,
+    passed: maxSimilarity > 0.3,
+    severity: 'info',
+    detail: `${(maxSimilarity * 100).toFixed(1)}%`
+  });
+  
+  if (maxSimilarity < 0.2) {
+    issues.push({
+      severity: 'warning',
+      message: `与已验证端点相似度较低 (${(maxSimilarity * 100).toFixed(1)}%)`
+    });
+  }
+  
+  const passed = !issues.some(i => i.severity === 'error');
+  
+  return { passed, issues, checks, similarity: maxSimilarity, mostSimilarEndpoint };
 }
 
-// 审查所有生成的端点
+// ═══════════════════════════════════════════════════════════════════
+// 审查单个文件
+// ═══════════════════════════════════════════════════════════════════
+
+function reviewFile(filepath, verifiedTemplates) {
+  const code = fs.readFileSync(filepath, 'utf8');
+  const filename = path.basename(filepath);
+  
+  // 确定类别
+  const category = classifyEndpoint(code);
+  
+  // 对比已验证端点
+  const comparison = compareWithVerified(code, category, verifiedTemplates);
+  
+  return {
+    file: filename,
+    category,
+    passed: comparison.passed,
+    errors: comparison.issues.filter(i => i.severity === 'error'),
+    warnings: comparison.issues.filter(i => i.severity === 'warning'),
+    checks: comparison.checks,
+    similarity: comparison.similarity,
+    mostSimilarEndpoint: comparison.mostSimilarEndpoint
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 主函数
+// ═══════════════════════════════════════════════════════════════════
+
 function reviewAllEndpoints() {
-  console.log('=== Endpoint Code Review ===\n');
+  console.log('=== Endpoint Code Review v2 ===\n');
   
   if (!fs.existsSync(GENERATED_DIR)) {
     console.log('No generated endpoints to review.');
@@ -144,30 +276,40 @@ function reviewAllEndpoints() {
   
   console.log(`Found ${files.length} generated endpoint(s)\n`);
   
-  // 获取现有端点模式
-  const existingPatterns = extractExistingPatterns();
-  console.log(`Existing endpoints: ${existingPatterns.totalEndpoints}`);
-  console.log(`Existing patterns verified: requirePayment=${existingPatterns.patterns.hasRequirePayment}\n`);
+  // 提取已验证端点模板
+  const verifiedTemplates = extractVerifiedEndpoints();
   
+  console.log('已验证端点模板:');
+  Object.entries(verifiedTemplates).forEach(([category, template]) => {
+    console.log(`  ${category}: ${template.foundEndpoints?.length || 0} 个端点`);
+    if (template.foundEndpoints?.length > 0) {
+      console.log(`    示例: ${template.foundEndpoints.slice(0, 2).join(', ')}`);
+    }
+  });
+  console.log('');
+  
+  // 审查每个文件
   const allResults = [];
   let allPassed = true;
   
   files.forEach(file => {
     const filepath = path.join(GENERATED_DIR, file);
-    const result = reviewFile(filepath);
+    const result = reviewFile(filepath, verifiedTemplates);
     allResults.push(result);
     
     console.log(`📄 ${file}`);
-    console.log(`   Status: ${result.passed ? '✅ PASSED' : '❌ FAILED'}`);
+    console.log(`   类别: ${result.category}`);
+    console.log(`   状态: ${result.passed ? '✅ PASSED' : '❌ FAILED'}`);
+    console.log(`   相似度: ${(result.similarity * 100 || 0).toFixed(1)}% (对比 ${result.mostSimilarEndpoint || 'N/A'})`);
     
     if (result.errors.length > 0) {
-      console.log(`   Errors: ${result.errors.length}`);
-      result.errors.forEach(e => console.log(`     - ${e}`));
+      console.log(`   错误: ${result.errors.length}`);
+      result.errors.forEach(e => console.log(`     ❌ ${e.message}`));
     }
     
     if (result.warnings.length > 0) {
-      console.log(`   Warnings: ${result.warnings.length}`);
-      result.warnings.forEach(w => console.log(`     - ${w}`));
+      console.log(`   警告: ${result.warnings.length}`);
+      result.warnings.forEach(w => console.log(`     ⚠️  ${w.message}`));
     }
     
     if (!result.passed) {
@@ -185,7 +327,9 @@ function reviewAllEndpoints() {
     failed: allResults.filter(r => !r.passed).length,
     allPassed,
     results: allResults,
-    existingPatterns
+    verifiedTemplates: Object.fromEntries(
+      Object.entries(verifiedTemplates).map(([k, v]) => [k, { endpoints: v.foundEndpoints, patternCount: v.requiredPatterns?.length }])
+    )
   };
   
   fs.writeFileSync(REVIEW_FILE, JSON.stringify(report, null, 2));
@@ -201,7 +345,7 @@ function reviewAllEndpoints() {
 }
 
 // 导出
-module.exports = { reviewAllEndpoints, extractExistingPatterns, REVIEW_RULES };
+module.exports = { reviewAllEndpoints, extractVerifiedEndpoints, classifyEndpoint, compareWithVerified };
 
 // 执行
 if (require.main === module) {
