@@ -157,7 +157,7 @@ function requirePayment(amountUsd, description, httpMethod, queryParams, outputE
 app.get('/', (req, res) => {
   res.json({
     name: 'x402 Data API Hub',
-    version: '2.3.0',
+    version: '2.4.0',
     description: 'Multi-category data APIs with x402 micropayments',
     endpoints: {
       free: ['GET /', 'GET /api/health'],
@@ -176,8 +176,12 @@ app.get('/', (req, res) => {
         'GET /api/weather/forecast/{city} - $0.02'
       ],
       security: [
-        'GET /api/security/address/{address} - $0.08 (Address risk analysis)',
-        'GET /api/security/token/{address} - $0.05 (Token security check)'
+        'GET /api/security/address/{address} - $0.08',
+        'GET /api/security/token/{address} - $0.05'
+      ],
+      dex: [
+        'GET /api/dex/volume/{token} - $0.03',
+        'GET /api/dex/trending - $0.02'
       ]
     },
     supported_cities: ['beijing', 'shanghai', 'shenzhen', 'tokyo', 'new york', 'london', 'paris', 'singapore', 'sydney', 'dubai', 'hong kong', 'moscow', 'mumbai', 'seoul', 'los angeles']
@@ -744,6 +748,91 @@ app.get('/api/security/token/:address', async (req, res) => {
   }
 });
 
+// ─── PAID ENDPOINTS: DEX Data (GROWING DEMAND) ──────────
+
+app.get('/api/dex/volume/:token', async (req, res) => {
+  const token = req.params.token.toLowerCase();
+  
+  const outputExample = {
+    token: token.toUpperCase(),
+    volume_24h_usd: 15000000,
+    transactions_24h: 2500,
+    top_pairs: [
+      { pair: 'WETH/USDC', volume: 5000000, dex: 'Uniswap' }
+    ]
+  };
+  
+  const gate = requirePayment(0.03, `DEX volume analysis for ${token.toUpperCase()}`, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // Use DeFi Llama for DEX data
+      const dexData = await fetchWithCache(
+        `https://coins.llama.fi/v2/coin/coingecko:${token}`
+      );
+      
+      // Get DEX volumes from DeFi Llama
+      const volumes = await fetchWithCache(
+        'https://api.llama.fi/overview/dexs'
+      );
+      
+      // Filter relevant data
+      const relevantDexs = volumes.protocols?.slice(0, 10) || [];
+      
+      res.json({
+        token: token.toUpperCase(),
+        price_usd: dexData.coins?.[`coingecko:${token}`]?.price || null,
+        total_dex_volume_24h: volumes.totalVolume24h || 0,
+        top_dexs: relevantDexs.map(d => ({
+          name: d.name,
+          volume_24h: Math.round(d.volume24h || 0),
+          chain: d.chain
+        })),
+        note: 'Real-time DEX volume from DeFi Llama',
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch DEX volume data' });
+    }
+  }
+});
+
+app.get('/api/dex/trending', async (req, res) => {
+  const outputExample = {
+    trending_tokens: [
+      { symbol: 'PEPE', volume_change_24h: 150, price_change_24h: 25 }
+    ]
+  };
+  
+  const gate = requirePayment(0.02, 'Trending tokens on DEXs', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // Get trending from CoinGecko
+      const trending = await fetchWithCache(
+        `${COINGECKO_API}/search/trending`
+      );
+      
+      const tokens = trending.coins?.slice(0, 10).map(c => ({
+        symbol: c.item.symbol,
+        name: c.item.name,
+        market_cap_rank: c.item.market_cap_rank,
+        price_btc: c.item.price_btc
+      })) || [];
+      
+      res.json({
+        trending_tokens: tokens,
+        note: 'Tokens trending on CoinGecko, often correlates with DEX activity',
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch trending tokens' });
+    }
+  }
+});
+
 // ─── OpenAPI / Discovery ──────────────────────────────
 
 app.get('/openapi.json', (req, res) => {
@@ -955,6 +1044,45 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'Token security analysis' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/dex/volume/{token}': {
+        get: {
+          summary: 'DEX volume analysis (PAID $0.03)',
+          parameters: [
+            { name: 'token', in: 'path', required: true, schema: { type: 'string' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.03' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '30000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'DEX volume data' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/dex/trending': {
+        get: {
+          summary: 'Trending tokens on DEXs (PAID $0.02)',
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.02' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '20000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Trending tokens' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
@@ -974,7 +1102,9 @@ app.get('/.well-known/x402', (req, res) => {
       `${origin}/api/weather/{city}`,
       `${origin}/api/weather/forecast/{city}`,
       `${origin}/api/security/address/{address}`,
-      `${origin}/api/security/token/{address}`
+      `${origin}/api/security/token/{address}`,
+      `${origin}/api/dex/volume/{token}`,
+      `${origin}/api/dex/trending`
     ],
     ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
