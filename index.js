@@ -1665,6 +1665,42 @@ app.get('/openapi.json', (req, res) => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// 通知 API（供 Agent 读取）
+// ═══════════════════════════════════════════════════════════════════
+app.get('/api/notifications', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const notifyFile = path.join(__dirname, 'data', 'pending-notifications.json');
+  
+  try {
+    if (fs.existsSync(notifyFile)) {
+      const notifications = JSON.parse(fs.readFileSync(notifyFile, 'utf8'));
+      res.json({ notifications });
+    } else {
+      res.json({ notifications: [] });
+    }
+  } catch (error) {
+    res.json({ notifications: [], error: error.message });
+  }
+});
+
+// 清除已发送的通知
+app.post('/api/notifications/clear', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const notifyFile = path.join(__dirname, 'data', 'pending-notifications.json');
+  
+  try {
+    if (fs.existsSync(notifyFile)) {
+      fs.unlinkSync(notifyFile);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
 // === ENDPOINTS END ===
 // 新端点将在此标记之前自动插入
 
