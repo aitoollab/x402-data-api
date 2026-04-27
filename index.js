@@ -157,7 +157,7 @@ function requirePayment(amountUsd, description, httpMethod, queryParams, outputE
 app.get('/', (req, res) => {
   res.json({
     name: 'x402 Data API Hub',
-    version: '2.5.0',
+    version: '2.1.0',
     description: 'Multi-category data APIs with x402 micropayments',
     endpoints: {
       free: ['GET /', 'GET /api/health'],
@@ -962,12 +962,7 @@ app.get('/openapi.json', (req, res) => {
       title: 'x402 Crypto Data API',
       description: 'Real-time cryptocurrency data with micropayments.',
       version: '2.1.0',
-      'x-guidance': {
-        usage: 'Pay per request with USDC on Base network. All endpoints return JSON data.',
-        payment: 'Send payment via x402 protocol. Include X-PAYMENT header with base64-encoded payment payload.',
-        supported_assets: ['USDC on Base'],
-        pricing_note: 'Prices are in USD. Payments are processed in USDC with 6 decimals.'
-      }
+      'x-guidance': 'Pay per request with USDC on Base network. Include X-PAYMENT header with base64-encoded payment. All endpoints return JSON data.'
     },
     'x-discovery': {
       ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
