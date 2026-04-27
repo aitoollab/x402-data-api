@@ -23,15 +23,15 @@ chmod 666 /var/log/x402-auto-update.log
 
 # 3. 设置 cron 定时任务（每天凌晨3点检查更新）
 echo "[3/4] 设置定时任务..."
-CRON_JOB="0 3 * * * $WORK_DIR/scripts/$SCRIPT_NAME >> /var/log/x402-auto-update.log 2>&1"
+CRON_JOB="0 3 * * * /bin/bash $WORK_DIR/scripts/$SCRIPT_NAME >> /var/log/x402-auto-update.log 2>&1"
 
 # 检查是否已存在
 if crontab -l 2>/dev/null | grep -q "auto-update.sh"; then
-  echo "  定时任务已存在，跳过"
-else
-  (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-  echo "  定时任务已添加（每天凌晨3点检查更新）"
+  echo "  定时任务已存在，更新..."
+  crontab -l 2>/dev/null | grep -v "auto-update.sh" | crontab -
 fi
+(crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+echo "  定时任务已添加（每天凌晨3点检查更新）"
 
 # 4. 首次运行
 echo "[4/4] 首次检查更新..."
