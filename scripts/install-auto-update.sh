@@ -20,16 +20,16 @@ echo "[2/4] 创建日志目录..."
 touch /var/log/x402-auto-update.log
 chmod 666 /var/log/x402-auto-update.log
 
-# 3. 设置 cron 定时任务（每5分钟检查一次）
+# 3. 设置 cron 定时任务（每天凌晨3点检查更新）
 echo "[3/4] 设置定时任务..."
-CRON_JOB="*/5 * * * * $WORK_DIR/scripts/$SCRIPT_NAME >> /var/log/x402-auto-update.log 2>&1"
+CRON_JOB="0 3 * * * $WORK_DIR/scripts/$SCRIPT_NAME >> /var/log/x402-auto-update.log 2>&1"
 
 # 检查是否已存在
 if crontab -l 2>/dev/null | grep -q "auto-update.sh"; then
   echo "  定时任务已存在，跳过"
 else
   (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-  echo "  定时任务已添加（每5分钟检查一次）"
+  echo "  定时任务已添加（每天凌晨3点检查更新）"
 fi
 
 # 4. 首次运行
@@ -40,7 +40,7 @@ echo ""
 echo "=== 安装完成! ==="
 echo ""
 echo "自动更新已启用："
-echo "  - 每 5 分钟检查 GitHub 更新"
+echo "  - 每天凌晨 3:00 检查 GitHub 更新"
 echo "  - 自动拉取并重启 PM2"
 echo "  - 日志: /var/log/x402-auto-update.log"
 echo ""
