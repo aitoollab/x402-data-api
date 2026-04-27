@@ -41,13 +41,15 @@ fi
 echo -e "\n[1/4] Merging endpoints into index.js..."
 
 # 在 index.js 中找到插入点（在最后一个端点之后）
-INSERT_MARKER="// === ENDPOINTS END ==="
+INSERT_MARKER="ENDPOINTS END"
 
 if grep -q "$INSERT_MARKER" "$INDEX_FILE"; then
-  # 有标记，插入到标记前
-  TEMP_FILE=$(mktemp)
+  # 找到标记的行号
+  LINE_NUM=$(grep -n "$INSERT_MARKER" "$INDEX_FILE" | head -1 | cut -d: -f1)
+  echo "  Insert before line: $LINE_NUM"
   
   # 获取所有生成的端点代码
+  TEMP_FILE=$(mktemp)
   for file in "$GENERATED_DIR"/*.js; do
     if [ -f "$file" ]; then
       echo "" >> "$TEMP_FILE"
@@ -56,8 +58,12 @@ if grep -q "$INSERT_MARKER" "$INDEX_FILE"; then
     fi
   done
   
-  # 插入到标记前
-  sed -i "/$INSERT_MARKER/r $TEMP_FILE" "$INDEX_FILE"
+  # 使用 awk 在标记行之前插入
+  awk -v line="$LINE_NUM" -v file="$TEMP_FILE" '
+    NR == line { while ((getline line < file) > 0) print line; close(file) }
+    { print }
+  ' "$INDEX_FILE" > "${INDEX_FILE}.tmp" && mv "${INDEX_FILE}.tmp" "$INDEX_FILE"
+  
   rm "$TEMP_FILE"
 else
   echo "  Warning: No insert marker found. Manual merge required."
