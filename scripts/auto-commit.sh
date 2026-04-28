@@ -10,6 +10,33 @@ REVIEW_FILE="$DATA_DIR/review-report.json"
 GENERATED_DIR="$DATA_DIR/generated"
 INDEX_FILE="$SCRIPTS_DIR/../index.js"
 
+# Git push 重试函数
+git_push_with_retry() {
+  local max_attempts=5
+  local attempt=1
+  local base_delay=3
+  
+  while [ $attempt -le $max_attempts ]; do
+    echo "  Attempt $attempt/$max_attempts..."
+    
+    if git push "$@" 2>&1; then
+      echo "  ✅ Push successful!"
+      return 0
+    fi
+    
+    if [ $attempt -lt $max_attempts ]; then
+      local delay=$((base_delay * attempt))
+      echo "  ⚠️  Push failed. Retrying in ${delay}s..."
+      sleep "$delay"
+    fi
+    
+    attempt=$((attempt + 1))
+  done
+  
+  echo "  ❌ Push failed after $max_attempts attempts"
+  return 1
+}
+
 echo "=== Auto Commit Script ==="
 
 # 检查审查报告是否存在
@@ -87,8 +114,8 @@ COMMIT_MSG="feat: auto-add endpoints from pipeline
 git commit -m "$COMMIT_MSG" || echo "No changes to commit"
 
 # 推送
-echo -e "\n[4/4] Pushing to GitHub..."
-git push
+echo -e "\n[4/4] Pushing to GitHub (with retry)..."
+git_push_with_retry
 
 echo -e "\n✅ Done! Endpoints committed and pushed."
 echo "Server will auto-update at scheduled time."
