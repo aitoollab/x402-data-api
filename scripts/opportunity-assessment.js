@@ -132,6 +132,52 @@ function assessOpportunities(discoveryResults) {
       difficulty: 'easy',
       suggestedPrice: 0.03,
       description: 'DEX trading volume, token velocity'
+    },
+    // ===== Agent Health Monitor 系列 =====
+    {
+      category: 'Agent Health Monitor',
+      competitors: 1,
+      competition: 'LOW',
+      demand: 'high',
+      difficulty: 'medium',
+      suggestedPrice: 0.03,
+      description: 'Comprehensive health score for AI agents on chain - uptime, gas efficiency, risk exposure, success rate'
+    },
+    {
+      category: 'Agent Gas Optimizer',
+      competitors: 2,
+      competition: 'LOW',
+      demand: 'high',
+      difficulty: 'easy',
+      suggestedPrice: 0.02,
+      description: 'Gas optimization suggestions based on historical transaction patterns'
+    },
+    {
+      category: 'Agent Wash Trade Detector',
+      competitors: 1,
+      competition: 'LOW',
+      demand: 'high',
+      difficulty: 'medium',
+      suggestedPrice: 0.05,
+      description: 'Detect wash trading patterns and artificial volume for AI agents'
+    },
+    {
+      category: 'Agent Behavior Classifier',
+      competitors: 2,
+      competition: 'LOW',
+      demand: 'high',
+      difficulty: 'easy',
+      suggestedPrice: 0.02,
+      description: 'Classify agent behavior patterns - LP, trader, arbitrage bot, whale'
+    },
+    {
+      category: 'Agent Full Report',
+      competitors: 1,
+      competition: 'LOW',
+      demand: 'high',
+      difficulty: 'medium',
+      suggestedPrice: 0.10,
+      description: 'Complete health report combining all agent monitoring endpoints'
     }
   ];
   
