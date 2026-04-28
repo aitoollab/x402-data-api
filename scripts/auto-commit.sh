@@ -14,7 +14,7 @@ INDEX_FILE="$SCRIPTS_DIR/../index.js"
 git_push_with_retry() {
   local max_attempts=5
   local attempt=1
-  local base_delay=3
+  local base_delay=7
   
   while [ $attempt -le $max_attempts ]; do
     echo "  Attempt $attempt/$max_attempts..."
@@ -25,7 +25,7 @@ git_push_with_retry() {
     fi
     
     if [ $attempt -lt $max_attempts ]; then
-      local delay=$((base_delay * attempt))
+      local delay=$((7 * attempt))
       echo "  ⚠️  Push failed. Retrying in ${delay}s..."
       sleep "$delay"
     fi
