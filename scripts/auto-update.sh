@@ -4,6 +4,7 @@
 
 set -e
 
+SCRIPTS_DIR="$(dirname "$0")"
 REPO_URL="https://github.com/aitoollab/x402-data-api"
 BRANCH="main"
 WORK_DIR="/opt/x402-data-api"
@@ -59,6 +60,10 @@ VERSION=$(curl -s https://api.aitoollab.top/ 2>/dev/null | grep -o '"version":"[
 log "Update complete!"
 log "Version: $VERSION"
 log "Health: $HEALTH"
+
+# 发送飞书通知
+UPDATE_MSG="🚀 服务器自动更新完成\n时间: $(date '+%Y-%m-%d %H:%M:%S')\n版本: $VERSION\n健康: $(echo $HEALTH | grep -o '"status":"[^"]*"' | cut -d'"' -f4)\nCommit: ${REMOTE_COMMIT:0:8}"
+node "$SCRIPTS_DIR/../scripts/notify-feishu.js" daily "服务器更新 - $(date '+%Y-%m-%d')" "$UPDATE_MSG" 2>/dev/null || true
 
 # 记录更新历史
 echo "$REMOTE_COMMIT $(date '+%Y-%m-%d %H:%M:%S')" >> /opt/x402-data-api/.update-history

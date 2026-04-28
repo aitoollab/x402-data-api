@@ -54,7 +54,9 @@ if (require.main === module) {
   }
   
   const [type, title, content] = args;
-  sendNotification(type, title, content);
+  // 转换 \n 为真实换行
+  const formattedContent = content.replace(/\\n/g, '\n');
+  sendNotification(type, title, formattedContent);
 }
 
 module.exports = { sendNotification };

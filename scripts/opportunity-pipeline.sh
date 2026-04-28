@@ -92,7 +92,18 @@ if [ "$REVIEW_PASSED" = true ] && [ "$NEW_COUNT" -gt 0 ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-# 发送飞书通知
+# 发送飞书通知（详细版）
 # ═══════════════════════════════════════════════════════════════════
-NOTIFY_MSG="管道执行完成\n审查: $([ "$REVIEW_PASSED" = true ] && echo "✅ 通过" || echo "❌ 未通过")\n新端点: ${NEW_COUNT:-0} 个\n报告: $REPORT"
+
+# 读取生成的端点列表
+ENDPOINT_LIST=""
+if [ -f "$DATA_DIR/review-report.json" ]; then
+  ENDPOINT_LIST=$(jq -r '.results[].file // [] | if type == "array" then .[] else . end' "$DATA_DIR/review-report.json" 2>/dev/null | grep -v null | tr '\n' ' ' || echo "无详细信息")
+fi
+
+if [ -z "$ENDPOINT_LIST" ] || [ "$ENDPOINT_LIST" = "null" ]; then
+  ENDPOINT_LIST="无"
+fi
+
+NOTIFY_MSG="🔍 管道执行完成\n━━━━━━━━━━━━━━━━━━━\n审查: $([ "$REVIEW_PASSED" = true ] && echo "✅ 通过" || echo "❌ 未通过")\n新端点: ${NEW_COUNT:-0} 个\n━━━━━━━━━━━━━━━━━━━\n端点列表:\n$ENDPOINT_LIST\n━━━━━━━━━━━━━━━━━━━\n报告: $REPORT"
 node "$SCRIPTS_DIR/notify-feishu.js" pipeline "机会发现管道 - $TODAY" "$NOTIFY_MSG" 2>/dev/null || true
