@@ -1660,6 +1660,198 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'Whale address analysis' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/agent/behavior-classifier/{address}': {
+        get: {
+          summary: 'AI Agent behavior classifier (PAID $0.02)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.02' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '20000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Agent behavior classification' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/agent/full-report/{address}': {
+        get: {
+          summary: 'AI Agent full report (PAID $0.10)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.10' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '100000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Full agent report' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/agent/gas-optimizer/{address}': {
+        get: {
+          summary: 'AI Agent gas optimizer (PAID $0.02)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.02' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '20000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Gas optimization suggestions' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/agent/health-monitor/{address}': {
+        get: {
+          summary: 'AI Agent health monitor (PAID $0.03)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.03' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '30000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Agent health score' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/agent/wash-trade-detector/{address}': {
+        get: {
+          summary: 'AI Agent wash trade detector (PAID $0.05)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '50000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Wash trade detection results' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/ai/agent-reputation/{address}': {
+        get: {
+          summary: 'AI agent reputation score (PAID $0.05)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '50000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Agent reputation data' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/cross-chain/bridge': {
+        get: {
+          summary: 'Cross-chain bridge status (PAID $0.05)',
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.05' },
+            input: { type: 'http', method: 'GET' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '50000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Bridge routes and fees' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/dex/analytics': {
+        get: {
+          summary: 'DEX analytics (PAID $0.03)',
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.03' },
+            input: { type: 'http', method: 'GET' },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '30000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'DEX volume and token data' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/whale/tracking/{address}': {
+        get: {
+          summary: 'Whale tracking (PAID $0.03)',
+          parameters: [
+            { name: 'address', in: 'path', required: true, schema: { type: 'string', description: 'Wallet address' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.03' },
+            input: { type: 'http', method: 'GET', pathParams: ['address'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '30000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Whale tracking data' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
