@@ -96,6 +96,7 @@ function assessOpportunities(discoveryResults) {
   }
   
   // 2. 添加预定义的高价值机会（如果 discovery 失败）
+  // 每个机会必须包含真实 dataSource 和处理逻辑
   const predefinedOpportunities = [
     {
       category: 'AI Agent Reputation',
@@ -104,7 +105,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'medium',
       suggestedPrice: 0.05,
-      description: 'Analyze wallet behavior, detect whales/bots/scammers'
+      description: 'Analyze wallet behavior, detect whales/bots/scammers',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions.filter(tx => tx.value > 1e17).length',
+      analysisLogic: '{ totalTx: transactions.length, largeTxs: transactions.filter(tx => tx.value > 1e17).length, avgGas: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / transactions.length) }'
     },
     {
       category: 'Whale Tracking',
@@ -113,7 +118,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'medium',
       suggestedPrice: 0.05,
-      description: 'Real-time whale transaction monitoring'
+      description: 'Real-time whale transaction monitoring',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions.filter(tx => parseFloat(tx.value) > 1)',
+      analysisLogic: '{ whaleTxs: transactions.filter(tx => parseFloat(tx.value) > 1).length, totalVolume: transactions.reduce((s,t) => s + parseFloat(t.value||0), 0), avgTxValue: transactions.length ? transactions.reduce((s,t) => s + parseFloat(t.value||0), 0) / transactions.length : 0 }'
     },
     {
       category: 'Cross-chain Bridge',
@@ -122,7 +131,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'medium',
       difficulty: 'hard',
       suggestedPrice: 0.05,
-      description: 'Bridge status, fees, wait times'
+      description: 'Bridge status, fees, wait times',
+      dataSource: "'https://li.quest/v1/bridge?fromChain=1&toChain=8453'",
+      dataType: 'json_api',
+      processLogic: 'data.routes || []',
+      analysisLogic: '{ routes: data.routes || [], count: data.routes?.length || 0 }'
     },
     {
       category: 'DEX Analytics',
@@ -131,9 +144,12 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'easy',
       suggestedPrice: 0.03,
-      description: 'DEX trading volume, token velocity'
+      description: 'DEX trading volume, token velocity',
+      dataSource: "'https://api.dexscreener.com/latest/dex/tokens'",
+      dataType: 'json_api',
+      processLogic: 'data.pairs || []',
+      analysisLogic: '{ pairs: (data.pairs || []).slice(0, 20).map(p => ({ symbol: p.baseToken?.symbol, volume24h: parseFloat(p.volume?.h24 || 0), liquidity: parseFloat(p.liquidity || 0) })) }'
     },
-    // ===== Agent Health Monitor 系列 =====
     {
       category: 'Agent Health Monitor',
       competitors: 1,
@@ -141,7 +157,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'medium',
       suggestedPrice: 0.03,
-      description: 'Comprehensive health score for AI agents on chain - uptime, gas efficiency, risk exposure, success rate'
+      description: 'Comprehensive health score for AI agents on chain - uptime, gas efficiency, risk exposure, success rate',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=50&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions.filter(tx => tx.from?.toLowerCase() === address.toLowerCase()).length',
+      analysisLogic: '{ totalTxs: transactions.length, failedTxs: transactions.filter(tx => tx.isError === "1").length, avgGas: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasUsed||0), 0) / (transactions.length||1)), healthScore: Math.round((1 - transactions.filter(tx=>tx.isError==="1").length/(transactions.length||1)) * 100) }'
     },
     {
       category: 'Agent Gas Optimizer',
@@ -150,7 +170,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'easy',
       suggestedPrice: 0.02,
-      description: 'Gas optimization suggestions based on historical transaction patterns'
+      description: 'Gas optimization suggestions based on historical transaction patterns',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions.map(tx => parseInt(tx.gasPrice || 0))',
+      analysisLogic: '{ avgGasPrice: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / (transactions.length||1)), suggestedFast: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / (transactions.length||1) * 1.1), suggestedStandard: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / (transactions.length||1)) }'
     },
     {
       category: 'Agent Wash Trade Detector',
@@ -159,7 +183,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'medium',
       suggestedPrice: 0.05,
-      description: 'Detect wash trading patterns and artificial volume for AI agents'
+      description: 'Detect wash trading patterns and artificial volume for AI agents',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions',
+      analysisLogic: '{ selfTrades: transactions.filter(tx => tx.to?.toLowerCase() === address.toLowerCase()).length, loopCount: 0, washTradeScore: Math.min(100, Math.round(transactions.filter(tx=>tx.to?.toLowerCase()===address.toLowerCase()).length / (transactions.length||1) * 200)) }'
     },
     {
       category: 'Agent Behavior Classifier',
@@ -168,7 +196,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'easy',
       suggestedPrice: 0.02,
-      description: 'Classify agent behavior patterns - LP, trader, arbitrage bot, whale'
+      description: 'Classify agent behavior patterns - LP, trader, arbitrage bot, whale',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions',
+      analysisLogic: '{ totalVolume: transactions.reduce((s,t) => s + parseFloat(t.value||0), 0), txCount: transactions.length, avgInterval: 0, behaviorType: transactions.filter(tx=>tx.value>1e18).length > 5 ? "whale" : transactions.filter(tx=>tx.to?.toLowerCase()===address.toLowerCase()).length > transactions.length*0.3 ? "arb" : "trader" }'
     },
     {
       category: 'Agent Full Report',
@@ -177,7 +209,11 @@ function assessOpportunities(discoveryResults) {
       demand: 'high',
       difficulty: 'medium',
       suggestedPrice: 0.10,
-      description: 'Complete health report combining all agent monitoring endpoints'
+      description: 'Complete health report combining all agent monitoring endpoints',
+      dataSource: '`${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`',
+      dataType: 'etherscan_txlist',
+      processLogic: 'transactions',
+      analysisLogic: '{ totalTxs: transactions.length, failedRate: Math.round(transactions.filter(tx=>tx.isError==="1").length/(transactions.length||1)*100), totalVolume: transactions.reduce((s,t) => s + parseFloat(t.value||0), 0), avgGasPrice: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0)/(transactions.length||1)), behaviorType: transactions.filter(tx=>tx.value>1e18).length>5?"whale":"other" }'
     }
   ];
   
@@ -209,7 +245,11 @@ function assessOpportunities(discoveryResults) {
       score: o.score,
       suggestedPrice: o.suggestedPrice,
       reason: `Score ${o.score}/100, ${o.competition} competition, ${o.demand} demand`,
-      description: o.description || `${o.category} API`
+      description: o.description || `${o.category} API`,
+      dataSource: o.dataSource || null,
+      dataType: o.dataType || null,
+      processLogic: o.processLogic || null,
+      analysisLogic: o.analysisLogic || null
     }));
   
   // 保存结果

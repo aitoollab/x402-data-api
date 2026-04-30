@@ -178,28 +178,30 @@ function compareWithVerified(code, category, verifiedTemplates) {
   
   // 3. 对比相似度
   const indexContent = fs.readFileSync(INDEX_FILE, 'utf8');
-  
+  const indexLines = indexContent.split('\n');
+
   // 计算与已验证端点的相似度
   let maxSimilarity = 0;
   let mostSimilarEndpoint = '';
-  
+
   if (template.foundEndpoints && template.foundEndpoints.length > 0) {
     template.foundEndpoints.forEach(endpoint => {
-      // 提取已验证端点的代码片段
-      const endpointPattern = new RegExp(
-        `app\\.get\\('${endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^}]+}\\);`,
-        'gs'
-      );
-      const match = indexContent.match(endpointPattern);
-      
-      if (match) {
-        // 简单相似度计算：共同关键词
-        const verifiedCode = match[0];
+      // 用行号定位，避免正则匹配嵌套 } 的问题
+      const escaped = endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const routePattern = new RegExp(`app\\.get\\('${escaped}`);
+      let routeLineIdx = -1;
+      for (let i = 0; i < indexLines.length; i++) {
+        if (routePattern.test(indexLines[i])) { routeLineIdx = i; break; }
+      }
+
+      if (routeLineIdx >= 0) {
+        // 提取该端点接下来的 35 行作为代码片段
+        const snippet = indexLines.slice(routeLineIdx, routeLineIdx + 35).join('\n');
         const newKeywords = code.split(/\s+/).filter(w => w.length > 5);
-        const verifiedKeywords = verifiedCode.split(/\s+/).filter(w => w.length > 5);
+        const verifiedKeywords = snippet.split(/\s+/).filter(w => w.length > 5);
         const common = newKeywords.filter(w => verifiedKeywords.includes(w));
         const similarity = common.length / Math.max(newKeywords.length, 1);
-        
+
         if (similarity > maxSimilarity) {
           maxSimilarity = similarity;
           mostSimilarEndpoint = endpoint;
@@ -218,8 +220,8 @@ function compareWithVerified(code, category, verifiedTemplates) {
   
   if (maxSimilarity < 0.2) {
     issues.push({
-      severity: 'warning',
-      message: `与已验证端点相似度较低 (${(maxSimilarity * 100).toFixed(1)}%)`
+      severity: 'error',
+      message: `与已验证端点相似度严重不足 (${(maxSimilarity * 100).toFixed(1)}%) - 代码可能无效`
     });
   }
   

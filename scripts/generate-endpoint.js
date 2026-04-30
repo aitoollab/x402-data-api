@@ -59,11 +59,11 @@ app.get('/api/${config.category}/${config.endpoint}/:address', async (req, res) 
   
   if (result === 'paid') {
     try {
-      // 使用 Etherscan 获取链上数据
-      const txListUrl = \`\${ETHERSCAN_API}?module=account&action=txlist&address=\${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=\${ETHERSCAN_KEY}\`;
-      const data = await fetchWithCache(txListUrl);
+      // 使用真实数据源
+      const dataSource = ${config.dataSource || "'https://api.example.com'"};
+      const data = await fetchWithCache(dataSource);
       
-      const transactions = data.result || [];
+      const transactions = data.result || data || [];
       
       // 分析逻辑
       const analysis = ${config.analysisLogic || '{}'};
@@ -121,16 +121,27 @@ function selectTemplate(category) {
 function generateEndpointConfig(opportunity) {
   const template = selectTemplate(opportunity.category);
   
+  // 拆分 "Agent Behavior Classifier" → category: agent, endpoint: behavior-classifier
+  const parts = opportunity.category.split(/\s+/);
+  const typePart = parts[0].toLowerCase();                                   // "agent"
+  const namePart = parts.slice(1).join('-').toLowerCase();                   // "behavior-classifier"
+  
+  // category: 第一部分（agent, ai, whale, dex 等）
+  // endpoint: 去掉前缀后的剩余部分
+  const category = typePart;
+  const endpoint = namePart;
+  
   return {
-    category: opportunity.category.toLowerCase().replace(/\s+/g, '-'),
-    endpoint: opportunity.category.toLowerCase().replace(/\s+/g, '-'),
+    category,
+    endpoint,
     price: opportunity.suggestedPrice,
     description: opportunity.description || `${opportunity.category} API`,
     template,
     exampleOutput: { result: 'example' },
-    dataSource: 'https://api.example.com/data',
-    processLogic: 'data',
-    analysisLogic: '{ score: 50 }'
+    dataSource: opportunity.dataSource || null,
+    dataType: opportunity.dataType || null,
+    processLogic: opportunity.processLogic || null,
+    analysisLogic: opportunity.analysisLogic || '{}'
   };
 }
 
