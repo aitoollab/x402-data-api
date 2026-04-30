@@ -132,7 +132,7 @@ function assessOpportunities(discoveryResults) {
       difficulty: 'hard',
       suggestedPrice: 0.05,
       description: 'Bridge status, fees, wait times',
-      dataSource: "'https://li.quest/v1/bridge?fromChain=1&toChain=8453'",
+      dataSource: "`https://li.quest/v1/bridge?fromChain=1&toChain=8453`",
       dataType: 'json_api',
       processLogic: 'data.routes || []',
       analysisLogic: '{ routes: data.routes || [], count: data.routes?.length || 0 }'
@@ -145,7 +145,7 @@ function assessOpportunities(discoveryResults) {
       difficulty: 'easy',
       suggestedPrice: 0.03,
       description: 'DEX trading volume, token velocity',
-      dataSource: "'https://api.dexscreener.com/latest/dex/tokens'",
+      dataSource: "`https://api.dexscreener.com/latest/dex/tokens`",
       dataType: 'json_api',
       processLogic: 'data.pairs || []',
       analysisLogic: '{ pairs: (data.pairs || []).slice(0, 20).map(p => ({ symbol: p.baseToken?.symbol, volume24h: parseFloat(p.volume?.h24 || 0), liquidity: parseFloat(p.liquidity || 0) })) }'

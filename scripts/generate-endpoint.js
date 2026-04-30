@@ -90,10 +90,10 @@ app.get('/api/${config.category}/${config.endpoint}', async (req, res) => {
   
   if (result === 'paid') {
     try {
-      const data = await fetchWithCache('${config.dataSource}');
+      const data = await fetchWithCache(${config.dataSource});
       
       res.json({
-        data,
+        data: ${config.processLogic || 'data'},
         last_updated: new Date().toISOString()
       });
     } catch (error) {

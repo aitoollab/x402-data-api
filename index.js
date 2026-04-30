@@ -1979,6 +1979,284 @@ app.get('/api/whale/tracking/:address', async (req, res) => {
     }
   }
 });
+
+
+// agent API
+app.get('/api/agent/behavior-classifier/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.02, 'Classify agent behavior patterns - LP, trader, arbitrage bot, whale for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { totalVolume: transactions.reduce((s,t) => s + parseFloat(t.value||0), 0), txCount: transactions.length, avgInterval: 0, behaviorType: transactions.filter(tx=>tx.value>1e18).length > 5 ? "whale" : transactions.filter(tx=>tx.to?.toLowerCase()===address.toLowerCase()).length > transactions.length*0.3 ? "arb" : "trader" };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+// agent API
+app.get('/api/agent/full-report/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.1, 'Complete health report combining all agent monitoring endpoints for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { totalTxs: transactions.length, failedRate: Math.round(transactions.filter(tx=>tx.isError==="1").length/(transactions.length||1)*100), totalVolume: transactions.reduce((s,t) => s + parseFloat(t.value||0), 0), avgGasPrice: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0)/(transactions.length||1)), behaviorType: transactions.filter(tx=>tx.value>1e18).length>5?"whale":"other" };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+// agent API
+app.get('/api/agent/gas-optimizer/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.02, 'Gas optimization suggestions based on historical transaction patterns for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { avgGasPrice: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / (transactions.length||1)), suggestedFast: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / (transactions.length||1) * 1.1), suggestedStandard: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / (transactions.length||1)) };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+// agent API
+app.get('/api/agent/health-monitor/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.03, 'Comprehensive health score for AI agents on chain - uptime, gas efficiency, risk exposure, success rate for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=50&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { totalTxs: transactions.length, failedTxs: transactions.filter(tx => tx.isError === "1").length, avgGas: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasUsed||0), 0) / (transactions.length||1)), healthScore: Math.round((1 - transactions.filter(tx=>tx.isError==="1").length/(transactions.length||1)) * 100) };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+// agent API
+app.get('/api/agent/wash-trade-detector/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.05, 'Detect wash trading patterns and artificial volume for AI agents for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { selfTrades: transactions.filter(tx => tx.to?.toLowerCase() === address.toLowerCase()).length, loopCount: 0, washTradeScore: Math.min(100, Math.round(transactions.filter(tx=>tx.to?.toLowerCase()===address.toLowerCase()).length / (transactions.length||1) * 200)) };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+// ai API
+app.get('/api/ai/agent-reputation/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.05, 'Analyze wallet behavior, detect whales/bots/scammers for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { totalTx: transactions.length, largeTxs: transactions.filter(tx => tx.value > 1e17).length, avgGas: Math.round(transactions.reduce((s,t) => s + parseInt(t.gasPrice||0), 0) / transactions.length) };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
+
+// cross-chain API
+app.get('/api/cross-chain/bridge', async (req, res) => {
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.05, 'Bridge status, fees, wait times', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const data = await fetchWithCache(`https://li.quest/v1/bridge?fromChain=1&toChain=8453`);
+      
+      res.json({
+        data: data.routes || [],
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch data' });
+    }
+  }
+});
+
+// dex API
+app.get('/api/dex/analytics', async (req, res) => {
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.03, 'DEX trading volume, token velocity', 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      const data = await fetchWithCache(`https://api.dexscreener.com/latest/dex/tokens`);
+      
+      res.json({
+        data: data.pairs || [],
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch data' });
+    }
+  }
+});
+
+// whale API
+app.get('/api/whale/tracking/:address', async (req, res) => {
+  const address = req.params.address.toLowerCase();
+  
+  const outputExample = {
+  "result": "example"
+};
+  
+  const gate = requirePayment(0.05, 'Real-time whale transaction monitoring for ' + address, 'GET', {}, outputExample);
+  const result = gate(req, res);
+  
+  if (result === 'paid') {
+    try {
+      // 使用真实数据源
+      const dataSource = `${ETHERSCAN_API}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc&apikey=${ETHERSCAN_KEY}`;
+      const data = await fetchWithCache(dataSource);
+      
+      const transactions = data.result || data || [];
+      
+      // 分析逻辑
+      const analysis = { whaleTxs: transactions.filter(tx => parseFloat(tx.value) > 1).length, totalVolume: transactions.reduce((s,t) => s + parseFloat(t.value||0), 0), avgTxValue: transactions.length ? transactions.reduce((s,t) => s + parseFloat(t.value||0), 0) / transactions.length : 0 };
+      
+      res.json({
+        address,
+        ...analysis,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to analyze address' });
+    }
+  }
+});
 // === ENDPOINTS END ===
 // 新端点将在此标记之前自动插入
 
