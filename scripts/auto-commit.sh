@@ -67,16 +67,27 @@ fi
 # 合并端点到 index.js
 echo -e "\n[1/4] Merging endpoints into index.js..."
 
-# 在 index.js 中找到插入点（在最后一个端点之后）
-INSERT_MARKER="ENDPOINTS END"
+# 生成的端点用 START/END 标记包裹，便于后续清理重复
+START_MARKER="// === GENERATED ENDPOINTS START ==="
+END_MARKER="// === ENDPOINTS END ==="
 
-if grep -q "$INSERT_MARKER" "$INDEX_FILE"; then
-  # 找到标记的行号
-  LINE_NUM=$(grep -n "$INSERT_MARKER" "$INDEX_FILE" | head -1 | cut -d: -f1)
+# 先清理之前可能存在的旧生成端点
+if grep -q "$START_MARKER" "$INDEX_FILE" && grep -q "$END_MARKER" "$INDEX_FILE"; then
+  echo "  Cleaning up previous generated endpoints..."
+  # 删除 START_MARKER 到 END_MARKER 之间的所有内容（包括两个标记）
+  sed -i "/$START_MARKER/,/$END_MARKER/{ /$START_MARKER/{ r /dev/stdin
+d }; /$END_MARKER/d; d }" "$INDEX_FILE" 2>/dev/null || \
+  awk "/$START_MARKER/{skip=1; next} /$END_MARKER/{skip=0; next} !skip" "$INDEX_FILE" > "${INDEX_FILE}.tmp" && mv "${INDEX_FILE}.tmp" "$INDEX_FILE"
+fi
+
+# 找到插入点
+if grep -q "$END_MARKER" "$INDEX_FILE"; then
+  LINE_NUM=$(grep -n "$END_MARKER" "$INDEX_FILE" | head -1 | cut -d: -f1)
   echo "  Insert before line: $LINE_NUM"
   
-  # 获取所有生成的端点代码
+  # 获取所有生成的端点代码，加上 START 标记
   TEMP_FILE=$(mktemp)
+  echo "$START_MARKER" >> "$TEMP_FILE"
   for file in "$GENERATED_DIR"/*.js; do
     if [ -f "$file" ]; then
       echo "" >> "$TEMP_FILE"
