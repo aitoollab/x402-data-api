@@ -2197,7 +2197,16 @@ app.get('/.well-known/x402', (req, res) => {
       `${origin}/api/dex/volume/{token}`,
       `${origin}/api/dex/trending`,
       `${origin}/api/bridge/status`,
-      `${origin}/api/bridge/estimate`
+      `${origin}/api/bridge/estimate`,
+      `${origin}/api/agent/behavior-classifier/{address}`,
+      `${origin}/api/agent/full-report/{address}`,
+      `${origin}/api/agent/gas-optimizer/{address}`,
+      `${origin}/api/agent/health-monitor/{address}`,
+      `${origin}/api/agent/wash-trade-detector/{address}`,
+      `${origin}/api/ai/agent-reputation/{address}`,
+      `${origin}/api/cross-chain/bridge`,
+      `${origin}/api/dex/analytics`,
+      `${origin}/api/whale/tracking/{address}`
     ],
     ownershipProofs: ['0x07d9f154b85a392220b4dcebfb96bcfcd49290f6062398e69ecd971c0e4f0834509e6669242778686deaf79725f70056c402103258230da384a65ade0c864c351c']
   });
