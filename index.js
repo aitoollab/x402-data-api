@@ -39,6 +39,225 @@ const cache = new Map();
 const CACHE_TTL = 60000;
 
 // ─── Endpoint Registry (single source of truth for discovery) ───────────────
+// ─── LLM Model Price Data (fetched from OpenRouter, cached) ───────────────────
+let llmModelsCache = null;
+let llmCacheTime = 0;
+const LLM_CACHE_TTL = 5 * 60 * 1000; // 5 min cache
+
+async function getLlmModels() {
+  const now = Date.now();
+  if (llmModelsCache && (now - llmCacheTime) < LLM_CACHE_TTL) {
+    return llmModelsCache;
+  }
+  try {
+    const resp = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: { 'Authorization': 'Bearer public' }
+    });
+    if (!resp.ok) throw new Error(`OpenRouter ${resp.status}`);
+    const data = await resp.json();
+    llmModelsCache = data.data.filter(m => m.pricing && m.pricing.prompt !== null);
+    llmCacheTime = now;
+    return llmModelsCache;
+  } catch (e) {
+    if (llmModelsCache) return llmModelsCache;
+    throw e;
+  }
+}
+
+function calcCost(model, inputTokens, outputTokens) {
+  const p = parseFloat(model.pricing?.prompt) || 0;
+  const c = parseFloat(model.pricing?.completion) || 0;
+  const inputCost = (inputTokens / 1e6) * p;
+  const outputCost = (outputTokens / 1e6) * c;
+  return inputCost + outputCost;
+}
+
+const TASK_KEYWORDS = {
+  text: ['text->text', 'text->text'],
+  code: ['code', 'coding', 'programming', 'software'],
+  vision: ['image', 'video', 'multimodal'],
+  reasoning: ['reasoning', 'think', 'chain'],
+  free: ['free', 'zero-cost'],
+};
+
+async function filterModels({ task, maxPrice, minContext, modality, hasTools, limit = 10 }) {
+  const models = await getLlmModels();
+  return models
+    .filter(m => {
+      if (task && task !== 'all') {
+        const kw = TASK_KEYWORDS[task] || [task];
+        const desc = (m.description || '').toLowerCase();
+        const arch = (m.architecture?.modality || '').toLowerCase();
+        const match = kw.some(k => desc.includes(k) || arch.includes(k));
+        if (!match) return false;
+      }
+      if (maxPrice) {
+        const p = parseFloat(m.pricing?.prompt) || Infinity;
+        if (p > maxPrice) return false;
+      }
+      if (minContext && (m.context_length || 0) < minContext) return false;
+      if (modality && m.architecture?.modality !== modality) return false;
+      if (hasTools) {
+        const supported = m.supported_parameters || [];
+        if (!supported.includes('tools')) return false;
+      }
+      return true;
+    })
+    .slice(0, limit);
+}
+
+// ─── LLM Comparison Endpoints ─────────────────────────────────────────────────
+
+app.get('/api/llm/cheapest', async (req, res) => {
+  const gate = requirePayment(0.002, 'Find cheapest LLM models by task', 'GET', [
+    { name: 'task', in: 'query' }, { name: 'limit', in: 'query' }
+  ], { task: 'code', count: 10, models: [] });
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const { task = 'text', limit = 10, max_price, min_context } = req.query;
+    const maxPrice = max_price ? parseFloat(max_price) : undefined;
+    const minContext = min_context ? parseInt(min_context) : undefined;
+    const models = await filterModels({ task, maxPrice, minContext, limit: parseInt(limit) });
+
+    const byCost = models
+      .map(m => ({
+        id: m.id,
+        name: m.name,
+        provider: m.id.split('/')[0],
+        price_per_1m_input: parseFloat(m.pricing.prompt),
+        price_per_1m_output: parseFloat(m.pricing.completion),
+        context_length: m.context_length,
+        modality: m.architecture?.modality,
+        supports_tools: (m.supported_parameters || []).includes('tools'),
+        estimated_cost_1k_input: ((parseFloat(m.pricing.prompt) || 0) / 1000).toFixed(6),
+      }))
+      .sort((a, b) => a.price_per_1m_input - b.price_per_1m_input);
+
+    res.json({ task, count: byCost.length, models: byCost });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/llm/compare', async (req, res) => {
+  const gate = requirePayment(0.002, 'Compare specific LLM models', 'GET', [
+    { name: 'models', in: 'query' }, { name: 'input_tokens', in: 'query' }, { name: 'output_tokens', in: 'query' }
+  ], { models: [] });
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const { models: modelIds, input_tokens = 1000, output_tokens = 500 } = req.query;
+    if (!modelIds) return res.status(400).json({ error: 'models param required (comma-separated)' });
+    const ids = modelIds.split(',').map(m => m.trim());
+    const allModels = await getLlmModels();
+
+    const result = ids.map(id => {
+      const m = allModels.find(m => m.id === id || m.id.includes(id));
+      if (!m) return { id, error: 'not found' };
+      return {
+        id: m.id,
+        name: m.name,
+        price_per_1m_input: parseFloat(m.pricing.prompt),
+        price_per_1m_output: parseFloat(m.pricing.completion),
+        context_length: m.context_length,
+        modality: m.architecture?.modality,
+        supported_parameters: m.supported_parameters,
+        estimated_cost: calcCost(m, parseInt(input_tokens), parseInt(output_tokens)).toFixed(6),
+      };
+    });
+
+    res.json({ input_tokens: parseInt(input_tokens), output_tokens: parseInt(output_tokens), models: result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/llm/rankings', async (req, res) => {
+  const gate = requirePayment(0.003, 'LLM price/performance rankings', 'GET', [
+    { name: 'category', in: 'query' }, { name: 'limit', in: 'query' }
+  ], { category: 'all', rankings: [] });
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const { category = 'all', limit = 20 } = req.query;
+    const allModels = await getLlmModels();
+
+    const scored = allModels
+      .filter(m => {
+        if (category !== 'all') {
+          const kw = TASK_KEYWORDS[category] || [category];
+          const desc = (m.description || '').toLowerCase();
+          return kw.some(k => desc.includes(k));
+        }
+        return true;
+      })
+      .filter(m => parseFloat(m.pricing?.prompt) > 0)
+      .map(m => {
+        const price = parseFloat(m.pricing.prompt);
+        const context = m.context_length || 8192;
+        const valueScore = context / (price * 1e6);
+        return {
+          id: m.id,
+          name: m.name,
+          provider: m.id.split('/')[0],
+          price_per_1m_input: price,
+          price_per_1m_output: parseFloat(m.pricing.completion),
+          context_length: context,
+          modality: m.architecture?.modality,
+          value_score: parseFloat(valueScore.toFixed(2)),
+          supports_tools: (m.supported_parameters || []).includes('tools'),
+        };
+      })
+      .sort((a, b) => b.value_score - a.value_score)
+      .slice(0, parseInt(limit));
+
+    res.json({ category, count: scored.length, rankings: scored });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/llm/search', async (req, res) => {
+  const gate = requirePayment(0.002, 'Search LLM models', 'GET', [
+    { name: 'q', in: 'query' }, { name: 'task', in: 'query' }, { name: 'limit', in: 'query' }
+  ], { query: '', results: [] });
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const { q, task, limit = 10 } = req.query;
+    if (!q) return res.status(400).json({ error: 'q (query) param required' });
+    const allModels = await getLlmModels();
+    const qLower = q.toLowerCase();
+
+    const results = allModels
+      .filter(m => {
+        const match = m.id.includes(qLower) ||
+          (m.name || '').toLowerCase().includes(qLower) ||
+          (m.description || '').toLowerCase().includes(qLower);
+        if (!match) return false;
+        if (task) {
+          const kw = TASK_KEYWORDS[task] || [task];
+          const desc = (m.description || '').toLowerCase();
+          return kw.some(k => desc.includes(k));
+        }
+        return true;
+      })
+      .slice(0, parseInt(limit))
+      .map(m => ({
+        id: m.id,
+        name: m.name,
+        provider: m.id.split('/')[0],
+        description: (m.description || '').substring(0, 200),
+        price_per_1m_input: parseFloat(m.pricing.prompt),
+        price_per_1m_output: parseFloat(m.pricing.completion),
+        context_length: m.context_length,
+        modality: m.architecture?.modality,
+        supports_tools: (m.supported_parameters || []).includes('tools'),
+      }));
+
+    res.json({ query: q, count: results.length, results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const ENDPOINTS_CONFIG = [
   {
     slug: 'crypto-price',
@@ -255,6 +474,54 @@ const ENDPOINTS_CONFIG = [
     priceUsd: 0.05,
     params: [{ name: 'address', in: 'path', description: 'Whale wallet address: 0x...' }],
     outputExample: { address: '0x...', total_value_usd: 2345678, entry_avg: 62000, current_price: 67432, unrealized_pnl_pct: 8.7, position_age_days: 14, last_updated: '2026-05-01T10:00:00.000Z' }
+  },
+  {
+    slug: 'llm-cheapest',
+    path: '/api/llm/cheapest',
+    description: 'Find cheapest LLM models by task type (text/code/vision/reasoning/free)',
+    priceUsd: 0.002,
+    params: [
+      { name: 'task', in: 'query', description: 'Task type: text, code, vision, reasoning, free, all (default: text)' },
+      { name: 'limit', in: 'query', description: 'Max results: 1-50 (default: 10)' },
+      { name: 'max_price', in: 'query', description: 'Max price per 1M input tokens (USD)' },
+      { name: 'min_context', in: 'query', description: 'Min context length in tokens' }
+    ],
+    outputExample: { task: 'code', count: 10, models: [{ id: 'meta-llama/llama-3-8b-instruct', name: 'Meta: Llama 3 8B', provider: 'meta-llama', price_per_1m_input: 0.03, context_length: 8192 }] }
+  },
+  {
+    slug: 'llm-compare',
+    path: '/api/llm/compare',
+    description: 'Compare specific LLM models by price and context length',
+    priceUsd: 0.002,
+    params: [
+      { name: 'models', in: 'query', description: 'Comma-separated model IDs (e.g. gpt-4,claude-3-haiku)' },
+      { name: 'input_tokens', in: 'query', description: 'Input token count for cost estimate (default: 1000)' },
+      { name: 'output_tokens', in: 'query', description: 'Output token count for cost estimate (default: 500)' }
+    ],
+    outputExample: { models: [{ id: 'openai/gpt-4o', name: 'GPT-4o', price_per_1m_input: 2.5, estimated_cost: '0.00425' }] }
+  },
+  {
+    slug: 'llm-rankings',
+    path: '/api/llm/rankings',
+    description: 'LLM price/performance rankings by category (value score = context/price)',
+    priceUsd: 0.003,
+    params: [
+      { name: 'category', in: 'query', description: 'Category: text, code, vision, reasoning, free, all (default: all)' },
+      { name: 'limit', in: 'query', description: 'Max results: 1-50 (default: 20)' }
+    ],
+    outputExample: { category: 'code', count: 20, rankings: [{ id: 'poolside/laguna-xs.2', name: 'Poolside: Laguna XS.2', value_score: 524288, price_per_1m_input: 0 }] }
+  },
+  {
+    slug: 'llm-search',
+    path: '/api/llm/search',
+    description: 'Search LLM models by name, provider, or capability',
+    priceUsd: 0.002,
+    params: [
+      { name: 'q', in: 'query', description: 'Search query (model name, provider, or keyword)' },
+      { name: 'task', in: 'query', description: 'Optional task filter: text, code, vision, reasoning' },
+      { name: 'limit', in: 'query', description: 'Max results: 1-50 (default: 10)' }
+    ],
+    outputExample: { query: 'coding', count: 5, results: [{ id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', supports_tools: true }] }
   }
 ];
 
