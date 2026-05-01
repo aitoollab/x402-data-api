@@ -109,17 +109,18 @@ async function filterModels({ task, maxPrice, minContext, modality, hasTools, li
 // ─── LLM Comparison Endpoints ─────────────────────────────────────────────────
 
 app.get('/api/llm/cheapest', async (req, res) => {
-  const gate = requirePayment(0.002, 'Find cheapest LLM models by task', 'GET', [
+  const gate = requirePayment(0.002, 'Find cheapest LLM for task and budget', 'GET', [
     { name: 'task', in: 'query' }, { name: 'limit', in: 'query' }
-  ], { task: 'code', count: 10, models: [] });
+  ], { task: 'code', recommendation: {}, alternatives: [] });
   if (gate(req, res) !== 'paid') return;
   try {
-    const { task = 'text', limit = 10, max_price, min_context } = req.query;
+    const { task = 'text', limit = 3, max_price, min_context } = req.query;
     const maxPrice = max_price ? parseFloat(max_price) : undefined;
     const minContext = min_context ? parseInt(min_context) : undefined;
-    const models = await filterModels({ task, maxPrice, minContext, limit: parseInt(limit) });
+    const models = await filterModels({ task, maxPrice, minContext, limit: parseInt(limit) * 3 });
 
-    const byCost = models
+    // Pick best by price/performance for this task
+    const scored = models
       .map(m => ({
         id: m.id,
         name: m.name,
@@ -129,11 +130,69 @@ app.get('/api/llm/cheapest', async (req, res) => {
         context_length: m.context_length,
         modality: m.architecture?.modality,
         supports_tools: (m.supported_parameters || []).includes('tools'),
-        estimated_cost_1k_input: ((parseFloat(m.pricing.prompt) || 0) / 1000).toFixed(6),
+        supported_parameters: m.supported_parameters,
       }))
-      .sort((a, b) => a.price_per_1m_input - b.price_per_1m_input);
+      .sort((a, b) => a.price_per_1m_input - b.price_per_1m_input)
+      .slice(0, parseInt(limit));
 
-    res.json({ task, count: byCost.length, models: byCost });
+    if (scored.length === 0) {
+      return res.json({ task, recommendation: null, message: 'No models match your criteria', alternatives: [] });
+    }
+
+    const best = scored[0];
+    const alt = scored.slice(1);
+
+    // Build API call example for OpenRouter-compatible format
+    const inputCost = best.price_per_1m_input;
+    const outputCost = best.price_per_1m_output;
+    const exampleInputTokens = task === 'code' ? 500 : task === 'reasoning' ? 1000 : 300;
+    const exampleOutputTokens = task === 'reasoning' ? 2000 : 500;
+    const estimatedCost = ((inputCost * exampleInputTokens) / 1e6 + (outputCost * exampleOutputTokens) / 1e6).toFixed(6);
+
+    const taskDescriptions = {
+      text: 'Write marketing copy for a productivity app, friendly tone, 300 words',
+      code: 'Implement a Python function that sorts a list of dictionaries by a key',
+      vision: 'Describe what you see in this image of a city skyline',
+      reasoning: 'Solve this logic puzzle: if all Zobs are Mogs and some Mogs are Bacs, are any Zobs definitely Bacs?',
+      free: 'casual conversation or general knowledge questions',
+      all: 'general purpose tasks',
+    };
+
+    res.json({
+      task,
+      recommendation: {
+        model: best.id,
+        name: best.name,
+        provider: best.provider,
+        why: scored.length === 1
+          ? `Only model matching your criteria (max $${maxPrice}/1M tokens)`
+          : `Best price-to-performance for ${task} tasks`,
+        price_per_1m_input: inputCost,
+        price_per_1m_output: outputCost,
+        context_length: best.context_length,
+        supports_tools: best.supports_tools,
+        estimated_call_cost: `$${estimatedCost} (${exampleInputTokens} in + ${exampleOutputTokens} out)`,
+        api_example: {
+          provider: 'openrouter',
+          url: `https://openrouter.ai/api/v1/chat/completions`,
+          headers: { 'Authorization': 'Bearer <your-key>', 'Content-Type': 'application/json' },
+          body: {
+            model: best.id,
+            messages: [{ role: 'user', content: taskDescriptions[task] || taskDescriptions.all }],
+            max_tokens: exampleOutputTokens,
+          },
+          or_cost_estimate: `$${estimatedCost} per call at this input size`,
+        },
+      },
+      alternatives: alt.map(m => ({
+        model: m.id,
+        name: m.name,
+        price_per_1m_input: m.price_per_1m_input,
+        price_per_1m_output: m.price_per_1m_output,
+        context_length: m.context_length,
+        supports_tools: m.supports_tools,
+      })),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -210,6 +269,91 @@ app.get('/api/llm/rankings', async (req, res) => {
       .slice(0, parseInt(limit));
 
     res.json({ category, count: scored.length, rankings: scored });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/llm/recommend', async (req, res) => {
+  // Agent-facing: describe what you need, get a specific model + API call ready to use
+  const gate = requirePayment(0.003, 'Get best LLM for task in plain English', 'GET', [
+    { name: 'goal', in: 'query' }, { name: 'budget', in: 'query' }, { name: 'need_tools', in: 'query' }
+  ], { goal: '', recommendation: {}, ready_to_use: null });
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const { goal = '', budget, need_tools } = req.query;
+    if (!goal) return res.status(400).json({ error: 'goal param required (describe what you need)' });
+
+    const allModels = await getLlmModels();
+    const budgetNum = budget ? parseFloat(budget) : undefined;
+    const wantTools = need_tools === 'true' || need_tools === '1';
+
+    // Score models for this goal
+    const scored = allModels
+      .filter(m => {
+        const price = parseFloat(m.pricing?.prompt || 0);
+        if (budgetNum && price > budgetNum) return false;
+        if (wantTools && !(m.supported_parameters || []).includes('tools')) return false;
+        return price > 0;
+      })
+      .map(m => {
+        const price = parseFloat(m.pricing.prompt);
+        const context = m.context_length || 8192;
+        // Simple relevance: longer context = better for complex tasks
+        const score = (context / 8192) * (1 / (price * 10 + 0.001));
+        return { m, score, price, context };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length === 0) {
+      return res.json({ goal, recommendation: null, message: 'No models match your criteria. Try relaxing budget or enabling need_tools=false.' });
+    }
+
+    const best = scored[0].m;
+    const b = scored[0];
+
+    // Determine task type from goal
+    const goalLower = goal.toLowerCase();
+    let taskType = 'text';
+    if (/code|program|function|debug|script/i.test(goalLower)) taskType = 'code';
+    else if (/image|photo|picture|visual|vision/i.test(goalLower)) taskType = 'vision';
+    else if (/reason|logic|math|puzzle|think/i.test(goalLower)) taskType = 'reasoning';
+    else if (/free|chat|conversation/i.test(goalLower)) taskType = 'free';
+
+    const inTokens = taskType === 'code' ? 500 : taskType === 'reasoning' ? 1000 : 300;
+    const outTokens = taskType === 'reasoning' ? 2000 : 500;
+    const estCost = ((b.price * inTokens) / 1e6 + (parseFloat(best.pricing.completion) * outTokens) / 1e6).toFixed(6);
+
+    res.json({
+      goal,
+      recommendation: {
+        model: best.id,
+        name: best.name,
+        provider: best.id.split('/')[0],
+        context_length: b.context,
+        supports_tools: (best.supported_parameters || []).includes('tools'),
+        price_per_1m_input: b.price,
+        price_per_1m_output: parseFloat(best.pricing.completion),
+        estimated_call_cost: `$${estCost} (${inTokens} in + ${outTokens} out)`,
+      },
+      ready_to_use: {
+        openrouter: {
+          url: 'https://openrouter.ai/api/v1/chat/completions',
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer <OPENROUTER_KEY>', 'Content-Type': 'application/json' },
+          body: {
+            model: best.id,
+            messages: [{ role: 'user', content: goal }],
+            max_tokens: outTokens,
+          },
+        },
+        alternative_providers: scored.slice(1, 3).map(s => ({
+          model: s.m.id,
+          name: s.m.name,
+          estimated_cost: `$${((s.price * inTokens) / 1e6 + (parseFloat(s.m.pricing.completion) * outTokens) / 1e6).toFixed(6)}`,
+        })),
+      },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -478,7 +622,7 @@ const ENDPOINTS_CONFIG = [
   {
     slug: 'llm-cheapest',
     path: '/api/llm/cheapest',
-    description: 'Find cheapest LLM models by task type (text/code/vision/reasoning/free)',
+    description: 'Get best LLM recommendation for task + budget. Returns specific model + OpenRouter API call example agents can use immediately.',
     priceUsd: 0.002,
     params: [
       { name: 'task', in: 'query', description: 'Task type: text, code, vision, reasoning, free, all (default: text)' },
@@ -486,7 +630,28 @@ const ENDPOINTS_CONFIG = [
       { name: 'max_price', in: 'query', description: 'Max price per 1M input tokens (USD)' },
       { name: 'min_context', in: 'query', description: 'Min context length in tokens' }
     ],
-    outputExample: { task: 'code', count: 10, models: [{ id: 'meta-llama/llama-3-8b-instruct', name: 'Meta: Llama 3 8B', provider: 'meta-llama', price_per_1m_input: 0.03, context_length: 8192 }] }
+    outputExample: {
+      task: 'code',
+      recommendation: {
+        model: 'meta-llama/llama-3-8b-instruct',
+        name: 'Meta: Llama 3 8B',
+        provider: 'meta-llama',
+        why: 'Best price-to-performance for code tasks',
+        price_per_1m_input: 0.03,
+        price_per_1m_output: 0.08,
+        context_length: 8192,
+        supports_tools: false,
+        estimated_call_cost: '$0.00026 (500 in + 500 out)',
+        api_example: {
+          provider: 'openrouter',
+          url: 'https://openrouter.ai/api/v1/chat/completions',
+          headers: { 'Authorization': 'Bearer <your-key>', 'Content-Type': 'application/json' },
+          body: { model: 'meta-llama/llama-3-8b-instruct', messages: [{ role: 'user', content: 'Implement a Python function...' }], max_tokens: 500 },
+          or_cost_estimate: '$0.00026 per call',
+        },
+      },
+      alternatives: [{ model: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku', price_per_1m_input: 0.08, context_length: 200000, supports_tools: true }],
+    }
   },
   {
     slug: 'llm-compare',
@@ -522,6 +687,22 @@ const ENDPOINTS_CONFIG = [
       { name: 'limit', in: 'query', description: 'Max results: 1-50 (default: 10)' }
     ],
     outputExample: { query: 'coding', count: 5, results: [{ id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', supports_tools: true }] }
+  },
+  {
+    slug: 'llm-recommend',
+    path: '/api/llm/recommend',
+    description: 'Describe your task in plain English, get a specific model recommendation + ready-to-use OpenRouter API call. For autonomous AI agents.',
+    priceUsd: 0.003,
+    params: [
+      { name: 'goal', in: 'query', description: 'What you need: "write Python code to sort a list", "analyze this image", "reason about this puzzle"' },
+      { name: 'budget', in: 'query', description: 'Max price per 1M input tokens (USD), optional' },
+      { name: 'need_tools', in: 'query', description: 'Require function calling/tools support: true or false, optional' }
+    ],
+    outputExample: {
+      goal: 'write a Python function to sort dictionaries',
+      recommendation: { model: 'meta-llama/llama-3-8b-instruct', name: 'Meta: Llama 3 8B', price_per_1m_input: 0.03, estimated_call_cost: '$0.00026' },
+      ready_to_use: { openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions', body: { model: 'meta-llama/llama-3-8b-instruct', messages: [{ role: 'user', content: 'write a Python function...' }] } } }
+    }
   }
 ];
 
