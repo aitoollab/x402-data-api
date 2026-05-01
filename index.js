@@ -2520,6 +2520,126 @@ app.get('/openapi.json', (req, res) => {
           },
           responses: { 200: { description: 'Whale tracking data' }, 402: { description: 'Payment Required' } }
         }
+      },
+      '/api/llm/cheapest': {
+        get: {
+          summary: 'Best LLM for task + budget (PAID $0.002)',
+          parameters: [
+            { name: 'task', in: 'query', schema: { type: 'string', description: 'Task type: text, code, vision, reasoning, free, all' } },
+            { name: 'limit', in: 'query', schema: { type: 'number', description: 'Max results (default: 10)' } },
+            { name: 'max_price', in: 'query', schema: { type: 'number', description: 'Max price per 1M input tokens (USD)' } },
+            { name: 'min_context', in: 'query', schema: { type: 'number', description: 'Min context length in tokens' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.002' },
+            input: { type: 'http', method: 'GET', queryParams: ['task', 'limit', 'max_price', 'min_context'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '2000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'Best LLM recommendation' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/llm/compare': {
+        get: {
+          summary: 'Compare multiple LLMs (PAID $0.002)',
+          parameters: [
+            { name: 'models', in: 'query', required: true, schema: { type: 'string', description: 'Comma-separated model IDs' } },
+            { name: 'input_tokens', in: 'query', schema: { type: 'number', description: 'Input tokens (default: 1000)' } },
+            { name: 'output_tokens', in: 'query', schema: { type: 'number', description: 'Output tokens (default: 500)' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.002' },
+            input: { type: 'http', method: 'GET', queryParams: ['models', 'input_tokens', 'output_tokens'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '2000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'LLM comparison results' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/llm/rankings': {
+        get: {
+          summary: 'LLM rankings by category (PAID $0.003)',
+          parameters: [
+            { name: 'task', in: 'query', schema: { type: 'string', description: 'Task category: text, code, vision, reasoning' } },
+            { name: 'limit', in: 'query', schema: { type: 'number', description: 'Max results (default: 20)' } },
+            { name: 'sort_by', in: 'query', schema: { type: 'string', description: 'Sort: price_low, price_high, context, popularity' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.003' },
+            input: { type: 'http', method: 'GET', queryParams: ['task', 'limit', 'sort_by'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '3000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'LLM rankings' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/llm/search': {
+        get: {
+          summary: 'Search LLMs by capability (PAID $0.002)',
+          parameters: [
+            { name: 'query', in: 'query', required: true, schema: { type: 'string', description: 'Search query e.g. "supports vision and function calling"' } },
+            { name: 'limit', in: 'query', schema: { type: 'number', description: 'Max results (default: 10)' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.002' },
+            input: { type: 'http', method: 'GET', queryParams: ['query', 'limit'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '2000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'LLM search results' }, 402: { description: 'Payment Required' } }
+        }
+      },
+      '/api/llm/recommend': {
+        get: {
+          summary: 'Plain English task to LLM recommendation (PAID $0.003)',
+          parameters: [
+            { name: 'goal', in: 'query', required: true, schema: { type: 'string', description: 'What you need: "write Python code", "analyze image", "reasoning puzzle"' } },
+            { name: 'budget', in: 'query', schema: { type: 'number', description: 'Max price per 1M input tokens (USD)' } },
+            { name: 'need_tools', in: 'query', schema: { type: 'boolean', description: 'Require function calling support' } }
+          ],
+          'x-payment-info': {
+            protocols: [{ x402: {} }],
+            price: { mode: 'fixed', currency: 'USD', amount: '0.003' },
+            input: { type: 'http', method: 'GET', queryParams: ['goal', 'budget', 'need_tools'] },
+            accepts: [{
+              scheme: 'exact',
+              network: NETWORK,
+              payTo: WALLET,
+              asset: ASSET,
+              amount: '3000',
+              maxTimeoutSeconds: 60
+            }]
+          },
+          responses: { 200: { description: 'LLM recommendation with API call example' }, 402: { description: 'Payment Required' } }
+        }
       }
     }
   });
