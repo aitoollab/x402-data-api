@@ -452,6 +452,46 @@ const ENDPOINTS_CONFIG = [
     outputExample: { totalTvl: 98765432101, chains: [{ name: 'Ethereum', tvl: 45678901234 }, { name: 'Base', tvl: 8765432109 }], last_updated: '2026-05-01T10:00:00.000Z' }
   },
   {
+    slug: 'mirage-workspace-create',
+    path: '/api/mirage/workspaces',
+    description: 'Create a Mirage AI agent virtual filesystem workspace (RAM or disk)',
+    priceUsd: 0.01,
+    params: [],
+    outputExample: { id: 'ws_xxx', mode: 'write', mounts: [{ prefix: '/ram/', resource: 'ram' }] }
+  },
+  {
+    slug: 'mirage-workspace-list',
+    path: '/api/mirage/workspaces',
+    description: 'List active Mirage workspaces',
+    priceUsd: 0.002,
+    params: [],
+    outputExample: [{ id: 'ws_xxx', mode: 'write', mount_count: 1 }]
+  },
+  {
+    slug: 'mirage-workspace-get',
+    path: '/api/mirage/workspaces/{id}',
+    description: 'Get details of a specific Mirage workspace',
+    priceUsd: 0.002,
+    params: [{ name: 'id', in: 'path', description: 'Workspace ID: ws_xxx' }],
+    outputExample: { id: 'ws_xxx', mode: 'write', mounts: [] }
+  },
+  {
+    slug: 'mirage-workspace-delete',
+    path: '/api/mirage/workspaces/{id}',
+    description: 'Delete a Mirage workspace',
+    priceUsd: 0.002,
+    params: [{ name: 'id', in: 'path', description: 'Workspace ID: ws_xxx' }],
+    outputExample: { deleted: true, workspace_id: 'ws_xxx' }
+  },
+  {
+    slug: 'mirage-workspace-execute',
+    path: '/api/mirage/workspaces/{id}/execute',
+    description: 'Execute a command in a Mirage workspace (bash-like interface)',
+    priceUsd: 0.002,
+    params: [{ name: 'id', in: 'path', description: 'Workspace ID: ws_xxx' }],
+    outputExample: { kind: 'io', exit_code: 0, stdout: 'hello\n', stderr: '' }
+  },
+  {
     slug: 'weather',
     path: '/api/weather/{city}',
     description: 'Current weather for any city (from Open-Meteo, free API)',
@@ -1269,6 +1309,104 @@ app.get('/api/weather/forecast/:city', async (req, res) => {
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch forecast data' });
     }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Mirage AI Agent Workspace API (x402-powered)
+// Proxies to mirage-daemon at http://127.0.0.1:8765
+// ═══════════════════════════════════════════════════════════════════
+
+const MIRAGE_DAEMON = 'http://127.0.0.1:8765';
+
+// POST /api/mirage/workspaces — Create a Mirage workspace
+// Body: { "mounts": { "/label": { "resource": "ram"|"disk", "config": {} } } }
+app.post('/api/mirage/workspaces', async (req, res) => {
+  const gate = requirePayment(
+    0.01,
+    'Create a Mirage AI agent virtual filesystem workspace',
+    'POST', [],
+    { id: 'ws_xxx', mode: 'write', mounts: [] }
+  );
+  if (gate(req, res) !== 'paid') return;
+
+  const { config } = req.body || {};
+  if (!config || !config.mounts) {
+    return res.status(400).json({ error: 'Missing config.mounts in body' });
+  }
+
+  try {
+    const r = await fetch(`${MIRAGE_DAEMON}/v1/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config }),
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch (e) {
+    res.status(502).json({ error: `Mirage daemon error: ${e.message}` });
+  }
+});
+
+// GET /api/mirage/workspaces — List active Mirage workspaces
+app.get('/api/mirage/workspaces', async (req, res) => {
+  const gate = requirePayment(0.002, 'List active Mirage workspaces', 'GET', [], []);
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const r = await fetch(`${MIRAGE_DAEMON}/v1/workspaces`);
+    res.json(await r.json());
+  } catch (e) {
+    res.status(502).json({ error: `Mirage daemon error: ${e.message}` });
+  }
+});
+
+// GET /api/mirage/workspaces/:id — Get workspace details
+app.get('/api/mirage/workspaces/:id', async (req, res) => {
+  const gate = requirePayment(0.002, `Get Mirage workspace ${req.params.id}`, 'GET', [], {});
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const r = await fetch(`${MIRAGE_DAEMON}/v1/workspaces/${req.params.id}`);
+    res.status(r.status).json(await r.json());
+  } catch (e) {
+    res.status(502).json({ error: `Mirage daemon error: ${e.message}` });
+  }
+});
+
+// DELETE /api/mirage/workspaces/:id — Delete a workspace
+app.delete('/api/mirage/workspaces/:id', async (req, res) => {
+  const gate = requirePayment(0.002, `Delete Mirage workspace ${req.params.id}`, 'DELETE', [], {});
+  if (gate(req, res) !== 'paid') return;
+  try {
+    const r = await fetch(`${MIRAGE_DAEMON}/v1/workspaces/${req.params.id}`, { method: 'DELETE' });
+    res.status(r.status).json(await r.json());
+  } catch (e) {
+    res.status(502).json({ error: `Mirage daemon error: ${e.message}` });
+  }
+});
+
+// POST /api/mirage/workspaces/:id/execute — Execute a command in workspace
+// Body: { "command": "ls /ram/", "cwd": "/" }
+app.post('/api/mirage/workspaces/:id/execute', async (req, res) => {
+  const gate = requirePayment(
+    0.002,
+    `Execute command in Mirage workspace ${req.params.id}`,
+    'POST', [],
+    { kind: 'io', exit_code: 0, stdout: '', stderr: '' }
+  );
+  if (gate(req, res) !== 'paid') return;
+
+  const { command, cwd = '/' } = req.body || {};
+  if (!command) return res.status(400).json({ error: 'Missing command in body' });
+
+  try {
+    const r = await fetch(`${MIRAGE_DAEMON}/v1/workspaces/${req.params.id}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command, cwd }),
+    });
+    res.status(r.status).json(await r.json());
+  } catch (e) {
+    res.status(502).json({ error: `Mirage daemon error: ${e.message}` });
   }
 });
 
